@@ -1,0 +1,1594 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>乐高拼模型</title>
+<!--
+  ============================================================
+  配置区：所有积木（组件）、插槽、预设模型都在下面这段 JSON 里。
+  加新论文：在 bricks 里加一条（slot 填它能插的槽），
+  在 presets 里加一条（slots / inner 写各槽积木 id）。
+  字段 verify: 列出需要核实的字段名，卡片里会显示「待核实」。
+  ============================================================
+-->
+<script type="application/json" id="lego-config">
+{
+  "slots": [
+    {"id": "tokenizer", "name": "分词器", "en": "Tokenizer", "level": 1, "cat": "input"},
+    {"id": "vision", "name": "视觉编码器", "en": "Vision Encoder", "level": 1, "cat": "input"},
+    {"id": "connector", "name": "模态连接器", "en": "Connector", "level": 1, "cat": "connector"},
+    {"id": "proprio", "name": "机器人状态（可选）", "en": "Proprioception", "level": 1, "cat": "input"},
+    {"id": "backbone", "name": "Transformer 主干", "en": "Backbone", "level": 1, "cat": "backbone"},
+    {"id": "head", "name": "输出头", "en": "Output Head", "level": 1, "cat": "text"},
+    {"id": "recipe", "name": "训练配方（可选，可多块）", "en": "Training Recipe", "level": 1, "cat": "recipe", "multi": true},
+    {"id": "pos", "name": "位置编码", "en": "Position Encoding", "level": 2, "cat": "pos"},
+    {"id": "norm", "name": "归一化", "en": "Normalization", "level": 2, "cat": "norm"},
+    {"id": "attn", "name": "注意力", "en": "Attention", "level": 2, "cat": "attn"},
+    {"id": "ffn", "name": "前馈网络", "en": "FFN", "level": 2, "cat": "ffn"}
+  ],
+
+  "bricks": [
+    {"id": "bytebpe", "slot": "tokenizer", "cat": "input", "name": "字节级 BPE", "sub": "Byte-level BPE",
+     "paper": "Language Models are Unsupervised Multitask Learners（GPT-2 论文）", "year": "2019", "org": "OpenAI",
+     "idea": "在 UTF-8 字节上做 BPE 合并：任何字符串都能编码，永远不会出现未知词 <unk>。",
+     "solves": "替代按词切分和字符级 BPE，既没有 OOV，词表也不用太大（GPT-2 为 50257）。DeepSeek-V3 也用字节级 BPE（128K 词表）。",
+     "metaphor": "先把所有文字拆成最小的颗粒（字节），再把总挨在一起的颗粒预先粘成大块。",
+     "flow": "文字先变成 UTF-8 字节，再按合并表拼成 token。中文常被拆成更多 token。",
+     "links": [{"label": "GPT-2 论文 PDF", "url": "https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf"}]},
+    {"id": "sp_bpe", "slot": "tokenizer", "cat": "input", "name": "SentencePiece BPE", "sub": "LLaMA 1/2 · Gemma",
+     "paper": "SentencePiece: A simple and language independent subword tokenizer and detokenizer for Neural Text Processing", "year": "2018", "org": "Google",
+     "idea": "直接在原始文本上学子词（空格也当字符，记作 ▁），不需要语言相关的预分词规则。",
+     "solves": "替代依赖空格和规则的预分词流程；中文、日文这类无空格语言也能统一处理。LLaMA 1/2、Mistral 用 32K 词表，Gemma 用 256K 词表。",
+     "metaphor": "不先按词切，而是统计哪些颗粒总挨在一起，直接学出常用的积木块。",
+     "flow": "SentencePiece 把句子切成子词片段，每段查到一个词表 ID。",
+     "links": [{"label": "arXiv:1808.06226", "url": "https://arxiv.org/abs/1808.06226"}]},
+    {"id": "tiktoken", "slot": "tokenizer", "cat": "input", "name": "tiktoken BPE", "sub": "LLaMA 3 · 128K 词表",
+     "paper": "tiktoken（OpenAI 开源的 BPE 分词库）", "year": "2022", "org": "OpenAI", "verify": ["year"],
+     "idea": "高速的字节级 BPE 实现。LLaMA 3 基于 tiktoken 构建 128K 词表。",
+     "solves": "相比 LLaMA 2 的 32K SentencePiece 词表，128K 词表压缩率更高，同样的文本需要的 token 更少。",
+     "metaphor": "积木块更大、种类更全，一句话用更少的块就能拼出来。",
+     "flow": "tiktoken 用 128K 大词表切分，同一句话 token 数更少、每块更大。",
+     "links": [{"label": "GitHub: openai/tiktoken", "url": "https://github.com/openai/tiktoken"}]},
+
+    {"id": "vit", "slot": "vision", "cat": "input", "name": "ViT", "sub": "Vision Transformer",
+     "paper": "An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale", "year": "2020", "org": "Google Research（Brain）",
+     "idea": "把图像切成 16×16 的 patch，每块当作一个 token 送进 Transformer。",
+     "solves": "替代 CNN 作视觉骨干，图像和文字从此能用同一种架构处理。RT-2 用的是大规模 ViT（ViT-22B 等）。",
+     "metaphor": "把照片剪成一张张小方块拼图，每块写成一个「词」。",
+     "flow": "图像被切成 patch，ViT 把每个 patch 编码成一个特征向量。",
+     "links": [{"label": "arXiv:2010.11929", "url": "https://arxiv.org/abs/2010.11929"}]},
+    {"id": "clip_vit", "slot": "vision", "cat": "input", "name": "CLIP ViT-L/14", "sub": "LLaVA 的眼睛",
+     "paper": "Learning Transferable Visual Models From Natural Language Supervision（CLIP）", "year": "2021", "org": "OpenAI",
+     "idea": "用 4 亿图文对做对比学习，让图像特征和文字描述落在同一个空间里。",
+     "solves": "不再依赖人工类别标签，特征天然「懂语言」。LLaVA-1.5 用 336px 输入的 CLIP ViT-L/14。",
+     "metaphor": "看图时脑子里已经配好了文字说明的一双眼睛。",
+     "flow": "CLIP ViT 输出的 patch 特征已经和文字语义对齐。",
+     "links": [{"label": "arXiv:2103.00020", "url": "https://arxiv.org/abs/2103.00020"}]},
+    {"id": "siglip", "slot": "vision", "cat": "input", "name": "SigLIP", "sub": "PaliGemma · π0",
+     "paper": "Sigmoid Loss for Language Image Pre-Training", "year": "2023", "org": "Google DeepMind",
+     "idea": "把 CLIP 的 softmax 对比损失换成逐对的 sigmoid 二分类损失。",
+     "solves": "不需要在整个 batch 上归一化，小 batch 也训得好，更容易扩展。PaliGemma 和 π0 用 SigLIP（约 400M）。",
+     "metaphor": "不是在一堆照片里挑「哪张最配」，而是对每一对单独判断「配不配」。",
+     "flow": "SigLIP 把图像编码成和语言对齐的 patch 特征。",
+     "links": [{"label": "arXiv:2303.15343", "url": "https://arxiv.org/abs/2303.15343"}]},
+    {"id": "dino_siglip", "slot": "vision", "cat": "input", "name": "DINOv2 + SigLIP", "sub": "双编码器融合",
+     "paper": "Prismatic VLMs（OpenVLA 沿用此设计）；DINOv2: Learning Robust Visual Features without Supervision", "year": "2024（Prismatic）/ 2023（DINOv2）",
+     "org": "Stanford / TRI（Prismatic）；Meta AI（DINOv2）", "verify": ["org", "links"],
+     "idea": "两个编码器各看一遍，patch 特征按通道拼接：DINOv2 擅长空间几何，SigLIP 擅长语义。",
+     "solves": "单一 CLIP/SigLIP 特征的空间细节偏弱，而机器人操作需要精确的位置信息。",
+     "metaphor": "一只眼睛看「在哪里」，另一只眼睛看「是什么」。",
+     "flow": "DINOv2 和 SigLIP 各编码一遍，两份特征在通道维拼起来。",
+     "links": [{"label": "Prismatic arXiv:2402.07865", "url": "https://arxiv.org/abs/2402.07865"}, {"label": "DINOv2 arXiv:2304.07193", "url": "https://arxiv.org/abs/2304.07193"}]},
+
+    {"id": "linear", "slot": "connector", "cat": "connector", "name": "线性投影", "sub": "Linear · LLaVA",
+     "paper": "Visual Instruction Tuning（LLaVA）", "year": "2023", "org": "UW–Madison / Microsoft Research / Columbia",
+     "idea": "一个可训练矩阵 W，把视觉特征映射到 LLM 的词向量空间。PaliGemma（π0 底座）也用线性投影。",
+     "solves": "用最简单的方式把冻结的视觉编码器接到 LLM 上：先对齐，再做视觉指令微调。",
+     "metaphor": "转接头：把视觉的插头形状改成 LLM 插座的形状。",
+     "flow": "每个 patch 特征乘一个矩阵 W，变成和词向量同维度的「视觉 token」。",
+     "links": [{"label": "arXiv:2304.08485", "url": "https://arxiv.org/abs/2304.08485"}]},
+    {"id": "mlp2", "slot": "connector", "cat": "connector", "name": "两层 MLP", "sub": "MLP · LLaVA-1.5",
+     "paper": "Improved Baselines with Visual Instruction Tuning（LLaVA-1.5）", "year": "2023", "org": "UW–Madison / Microsoft Research",
+     "idea": "把线性层换成 Linear → GELU → Linear 两层 MLP。",
+     "solves": "线性映射表达力不够；换成 MLP 后多模态能力明显提升，几乎不增加成本。OpenVLA 也用 MLP 投影。",
+     "metaphor": "转接头里多加了一道整形工序。",
+     "flow": "图像特征经过两层 MLP，变成 LLM 能读懂的 token。",
+     "links": [{"label": "arXiv:2310.03744", "url": "https://arxiv.org/abs/2310.03744"}]},
+    {"id": "qformer", "slot": "connector", "cat": "connector", "name": "Q-Former", "sub": "BLIP-2", "reduce": true,
+     "paper": "BLIP-2: Bootstrapping Language-Image Pre-training with Frozen Image Encoders and Large Language Models", "year": "2023", "org": "Salesforce Research",
+     "idea": "32 个可学习查询向量，通过交叉注意力向图像特征「提问」，最后只输出 32 个视觉 token。",
+     "solves": "视觉编码器和 LLM 都冻结时，用轻量桥接模块对齐两边；输出长度固定，省 LLM 算力。",
+     "metaphor": "派 32 个记者去看图，每人回来交一份摘要。",
+     "flow": "Q-Former 用固定数量的查询读图，把很多 patch 压缩成少量视觉 token。",
+     "links": [{"label": "arXiv:2301.12597", "url": "https://arxiv.org/abs/2301.12597"}]},
+    {"id": "perceiver", "slot": "connector", "cat": "connector", "name": "Perceiver Resampler", "sub": "Flamingo", "reduce": true,
+     "paper": "Flamingo: a Visual Language Model for Few-Shot Learning", "year": "2022", "org": "DeepMind",
+     "idea": "用固定数量的潜在查询，把任意多帧的图像特征重采样成 64 个视觉 token。",
+     "solves": "图片和视频帧数可变，统一成固定长度。注意：Flamingo 是用门控交叉注意力把视觉 token 注入冻结的 LLM，而不是直接拼进输入序列。",
+     "metaphor": "不管拍了多少张照片，都整理成一本固定页数的相册。",
+     "flow": "Perceiver Resampler 把可变数量的图像特征重采样成固定数量的 token。",
+     "links": [{"label": "arXiv:2204.14198", "url": "https://arxiv.org/abs/2204.14198"}]},
+
+    {"id": "proprio_state", "slot": "proprio", "cat": "input", "name": "本体感知状态", "sub": "Proprioception",
+     "paper": "VLA 常用输入（π0、Octo 等）", "year": "—", "org": "—",
+     "idea": "把机器人自身的关节角、末端位姿、夹爪开合编码成向量，作为额外输入。",
+     "solves": "只看图像很难确定手臂当前的精确姿态；连续控制需要知道「我现在在哪」。π0 把状态投影后送进动作专家。",
+     "metaphor": "闭着眼也知道自己的手举在哪里，这就是人的本体感觉。",
+     "flow": "关节角和夹爪开合被线性投影成状态 token。",
+     "links": [{"label": "π0 arXiv:2410.24164", "url": "https://arxiv.org/abs/2410.24164"}]},
+
+    {"id": "transformer", "slot": "backbone", "cat": "backbone", "name": "原始 Transformer", "sub": "编码器-解码器", "layers": "6",
+     "paper": "Attention Is All You Need", "year": "2017", "org": "Google Brain / Google Research",
+     "idea": "完全用注意力替代 RNN/CNN 处理序列。",
+     "solves": "RNN 只能逐个处理、无法并行，长距离依赖也难学。",
+     "metaphor": "全班同学同时互相看笔记，而不是一个传一个。",
+     "note": "原论文是编码器-解码器结构（各 6 层）；这里只用它的 Block 设计作对照。",
+     "inner": {"pos": "sin", "norm": "postln", "attn": "mha", "ffn": "relu"},
+     "links": [{"label": "arXiv:1706.03762", "url": "https://arxiv.org/abs/1706.03762"}]},
+    {"id": "gpt2", "slot": "backbone", "cat": "backbone", "name": "GPT-2", "sub": "仅解码器", "layers": "12–48",
+     "paper": "Language Models are Unsupervised Multitask Learners", "year": "2019", "org": "OpenAI",
+     "idea": "大规模无监督地「预测下一个词」，展示出零样本多任务能力。",
+     "solves": "从「每个任务训一个模型」走向「一个语言模型通吃」。Small 12 层，XL 48 层（1.5B）。",
+     "metaphor": "读了海量文本、最擅长接龙的学生。",
+     "inner": {"pos": "learned", "norm": "preln", "attn": "mha", "ffn": "gelu"},
+     "links": [{"label": "GPT-2 论文 PDF", "url": "https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf"}]},
+    {"id": "llama3", "slot": "backbone", "cat": "backbone", "name": "LLaMA 3", "sub": "8B / 70B / 405B", "layers": "32（8B）",
+     "paper": "The Llama 3 Herd of Models", "year": "2024", "org": "Meta",
+     "idea": "标准稠密 Transformer，配 15T token 训练数据和 128K 词表，靠数据质量与规模取胜。",
+     "solves": "开源模型追上闭源一线水平；结构上没有大改，重点在数据与训练。",
+     "metaphor": "积木还是那套，但教材更多更好。",
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "gqa", "ffn": "swiglu"},
+     "links": [{"label": "arXiv:2407.21783", "url": "https://arxiv.org/abs/2407.21783"}]},
+    {"id": "mixtral", "slot": "backbone", "cat": "backbone", "name": "Mixtral 8x7B", "sub": "稀疏 MoE", "layers": "32",
+     "paper": "Mixtral of Experts", "year": "2024", "org": "Mistral AI",
+     "idea": "每层有 8 个 FFN 专家，路由器为每个 token 只挑 2 个。",
+     "solves": "总参数约 47B，每个 token 只激活约 13B，推理成本接近一个 13B 稠密模型。",
+     "metaphor": "医院有 8 个专科，每位病人只挂 2 个号。",
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "gqa", "ffn": "moe"},
+     "links": [{"label": "arXiv:2401.04088", "url": "https://arxiv.org/abs/2401.04088"}]},
+    {"id": "dsv3", "slot": "backbone", "cat": "backbone", "name": "DeepSeek-V3", "sub": "671B 总 / 37B 激活", "layers": "61",
+     "paper": "DeepSeek-V3 Technical Report", "year": "2024", "org": "DeepSeek-AI",
+     "idea": "MLA 压缩 KV 缓存 + DeepSeekMoE 细粒度专家 + 无辅助损失的负载均衡 + 多 token 预测（MTP）。",
+     "solves": "用较低的训练成本做出性能很强的超大 MoE 模型。前 3 层是稠密 FFN，其余层是 MoE。",
+     "metaphor": "超大医院：常驻一位全科医生，再配 256 个细分专科，每次会诊叫 8 位。",
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "mla", "ffn": "dsmoe"},
+     "links": [{"label": "arXiv:2412.19437", "url": "https://arxiv.org/abs/2412.19437"}]},
+    {"id": "vicuna", "slot": "backbone", "cat": "backbone", "name": "Vicuna v1.5", "sub": "Llama 2 对话微调", "layers": "32（7B）/ 40（13B）",
+     "paper": "Vicuna（LMSYS 博客发布，无 arXiv 论文）", "year": "2023", "org": "LMSYS",
+     "idea": "在 ShareGPT 对话数据上微调 LLaMA / Llama 2 得到的对话模型。",
+     "solves": "提供对话能力强的开源 LLM 底座，LLaVA-1.5 用它当语言主干。",
+     "metaphor": "还是 Llama 2 那套积木，换了一本对话练习册。",
+     "note": "v1.5 基于 Llama 2；7B/13B 规模用 MHA（Llama 2 只有 34B/70B 用 GQA）。",
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "mha", "ffn": "swiglu"},
+     "links": []},
+    {"id": "llama2", "slot": "backbone", "cat": "backbone", "name": "Llama 2 7B", "sub": "OpenVLA 主干", "layers": "32",
+     "paper": "Llama 2: Open Foundation and Fine-Tuned Chat Models", "year": "2023", "org": "Meta",
+     "idea": "在 LLaMA 1 基础上扩到 2T token、4K 上下文，并发布 RLHF 对话版。",
+     "solves": "提供可商用的开源基座模型。",
+     "metaphor": "一套被大家改装最多的标准积木。",
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "mha", "ffn": "swiglu"},
+     "links": [{"label": "arXiv:2307.09288", "url": "https://arxiv.org/abs/2307.09288"}]},
+    {"id": "gemma", "slot": "backbone", "cat": "backbone", "name": "Gemma 2B", "sub": "PaliGemma 语言部分", "layers": "18",
+     "paper": "Gemma: Open Models Based on Gemini Research and Technology；PaliGemma", "year": "2024", "org": "Google DeepMind",
+     "idea": "与 Gemini 同源技术的小型开源模型；2B 版用 MQA、GeGLU 和 256K SentencePiece 词表。",
+     "solves": "小参数下保持强性能，适合作为多模态和机器人模型的底座。PaliGemma = SigLIP + 线性投影 + Gemma 2B。",
+     "metaphor": "小而精的积木套装，装进机器人也不嫌重。",
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "mqa", "ffn": "geglu"},
+     "links": [{"label": "Gemma arXiv:2403.08295", "url": "https://arxiv.org/abs/2403.08295"}, {"label": "PaliGemma arXiv:2407.07726", "url": "https://arxiv.org/abs/2407.07726"}]},
+    {"id": "opt", "slot": "backbone", "cat": "backbone", "name": "OPT / FlanT5（冻结）", "sub": "BLIP-2 的 LLM", "layers": "32（OPT-2.7B）",
+     "paper": "OPT: Open Pre-trained Transformer Language Models", "year": "2022", "org": "Meta AI（OPT）/ Google（Flan-T5）", "verify": ["layers"],
+     "idea": "BLIP-2 直接冻结现成的 LLM，只训练中间的 Q-Former。",
+     "solves": "不重新训练大模型也能让它看懂图像。",
+     "metaphor": "大脑不动，只换一副眼镜。",
+     "note": "内部积木按 OPT 填写；FlanT5 是编码器-解码器，结构不同。",
+     "inner": {"pos": "learned", "norm": "preln", "attn": "mha", "ffn": "relu"},
+     "links": [{"label": "OPT arXiv:2205.01068", "url": "https://arxiv.org/abs/2205.01068"}]},
+    {"id": "palix", "slot": "backbone", "cat": "backbone", "name": "PaLI-X / PaLM-E", "sub": "RT-2 的 VLM 底座", "layers": "待核实",
+     "paper": "PaLI-X: On Scaling up a Multilingual Vision and Language Model；PaLM-E: An Embodied Multimodal Language Model", "year": "2023", "org": "Google Research / Google DeepMind",
+     "verify": ["layers", "inner"],
+     "idea": "大规模视觉语言模型：PaLI-X 为 ViT-22B + 32B 编码器-解码器；PaLM-E 把图像等连续观测嵌入 PaLM 的词向量序列。",
+     "solves": "提供互联网规模的视觉语言知识，RT-2 在此基础上和机器人数据联合微调。",
+     "metaphor": "见多识广的大脑，RT-2 负责教它动手。",
+     "note": "内部积木按 PaLM 的设计填写（RoPE、MQA、SwiGLU），PaLI-X 编码器-解码器的细节不同，需核实。",
+     "inner": {"pos": "rope", "norm": "preln", "attn": "mqa", "ffn": "swiglu"},
+     "links": [{"label": "PaLI-X arXiv:2305.18565", "url": "https://arxiv.org/abs/2305.18565"}, {"label": "PaLM-E arXiv:2303.03378", "url": "https://arxiv.org/abs/2303.03378"}]},
+
+    {"id": "sin", "slot": "pos", "cat": "pos", "name": "正弦绝对位置", "sub": "Sinusoidal",
+     "paper": "Attention Is All You Need", "year": "2017", "org": "Google",
+     "idea": "用一组不同频率的 sin/cos 生成位置向量，直接加到词向量上。",
+     "solves": "注意力本身不分先后顺序，必须额外注入位置信息。",
+     "metaphor": "给每块积木印门牌号，门牌由几只快慢不同的钟表读数组成。",
+     "inNote": "只在进入第 1 层之前加到输入上一次。",
+     "flow": "每个 token 加上一份正弦位置向量，模型从此分得清谁前谁后。",
+     "links": [{"label": "arXiv:1706.03762", "url": "https://arxiv.org/abs/1706.03762"}]},
+    {"id": "learned", "slot": "pos", "cat": "pos", "name": "可学习位置", "sub": "Learned · GPT-2",
+     "paper": "GPT / GPT-2 等采用", "year": "2018–2019", "org": "OpenAI",
+     "idea": "每个位置一个可训练向量，跟着模型一起学出来。",
+     "solves": "比固定正弦更灵活；缺点是位置数固定，超过训练长度（GPT-2 为 1024）就没有对应向量。",
+     "metaphor": "每个座位贴一张自己学出来的标签，座位总数是定死的。",
+     "inNote": "只在输入处相加一次；能处理的最大长度 = 训练长度。",
+     "flow": "每个 token 加上它所在位置的那一条可学习向量。",
+     "links": [{"label": "GPT-2 论文 PDF", "url": "https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf"}]},
+    {"id": "rope", "slot": "pos", "cat": "pos", "name": "RoPE", "sub": "旋转位置编码",
+     "paper": "RoFormer: Enhanced Transformer with Rotary Position Embedding", "year": "2021", "org": "追一科技 Zhuiyi Technology",
+     "idea": "按位置把 Q、K 向量在二维子空间里旋转一个角度，两者点积自然只依赖相对距离。",
+     "solves": "绝对位置编码难以表达相对关系、长度外推差。现在是 LLaMA 系的标配。",
+     "metaphor": "每往后一格，指针多转一点；两根指针的夹角就是距离。",
+     "inNote": "不加到输入上，而是在每一层注意力里旋转 Q 和 K。",
+     "flow": "RoPE：在每层注意力里按位置旋转 Q、K，点积只看两者的相对距离。",
+     "links": [{"label": "arXiv:2104.09864", "url": "https://arxiv.org/abs/2104.09864"}]},
+    {"id": "alibi", "slot": "pos", "cat": "pos", "name": "ALiBi", "sub": "线性距离偏置",
+     "paper": "Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation", "year": "2021",
+     "org": "University of Washington / Facebook AI Research / Allen Institute for AI", "verify": ["org"],
+     "idea": "不用位置向量，直接在注意力分数上减去与距离成正比的惩罚。",
+     "solves": "训练时用短序列，推理时可以外推到更长序列。",
+     "metaphor": "离得越远的人，说话声音越小。",
+     "inNote": "每层注意力分数上加线性距离偏置，不同头斜率不同。",
+     "flow": "ALiBi：注意力分数按距离打折，远处的 token 影响更小。",
+     "links": [{"label": "arXiv:2108.12409", "url": "https://arxiv.org/abs/2108.12409"}]},
+
+    {"id": "postln", "slot": "norm", "cat": "norm", "name": "Post-LN", "sub": "原始 Transformer", "placement": "post",
+     "paper": "Attention Is All You Need", "year": "2017", "org": "Google",
+     "idea": "残差相加之后再做 LayerNorm：x ← LN(x + F(x))。",
+     "solves": "原始设计。层数一深梯度就不稳，必须配合学习率预热（warmup）。",
+     "metaphor": "每做完一道工序，先把结果并回主线，再整理一遍。",
+     "inNote": "位置：残差相加之后。公式 LN(x + F(x))",
+     "flow": "Post-LN：每个子层加完残差后再归一化。",
+     "links": [{"label": "arXiv:1706.03762", "url": "https://arxiv.org/abs/1706.03762"}]},
+    {"id": "preln", "slot": "norm", "cat": "norm", "name": "Pre-LN LayerNorm", "sub": "GPT-2 起", "placement": "pre",
+     "paper": "GPT-2 采用；系统分析见 On Layer Normalization in the Transformer Architecture", "year": "2019（GPT-2）/ 2020（分析论文）",
+     "org": "OpenAI；Microsoft Research Asia 等（分析论文）", "verify": ["org"],
+     "idea": "先 LayerNorm 再进子层：x ← x + F(LN(x))，残差主干保持「干净」。",
+     "solves": "深层网络训练更稳，可以少用甚至不用 warmup。",
+     "metaphor": "进工序前先把零件摆整齐，主传送带本身不受影响。",
+     "inNote": "位置：子层之前，残差支路里。公式 x + F(LN(x))",
+     "flow": "Pre-LN：进入注意力和 FFN 之前先做 LayerNorm。",
+     "links": [{"label": "arXiv:2002.04745", "url": "https://arxiv.org/abs/2002.04745"}]},
+    {"id": "rmsnorm", "slot": "norm", "cat": "norm", "name": "RMSNorm", "sub": "LLaMA · Gemma · DeepSeek", "placement": "pre",
+     "paper": "Root Mean Square Layer Normalization", "year": "2019", "org": "University of Edinburgh / University of Zurich",
+     "idea": "只按均方根缩放：x / RMS(x) · g，不减均值，不加偏置。",
+     "solves": "比 LayerNorm 计算更省，效果相当。LLaMA、Gemma、DeepSeek 都放在 Pre-Norm 位置使用。",
+     "metaphor": "只调音量大小，不调音调中心。",
+     "inNote": "位置：子层之前（Pre-Norm）。公式 x / RMS(x) · g",
+     "flow": "RMSNorm：进入子层前先按均方根缩放，比 LayerNorm 少一步减均值。",
+     "links": [{"label": "arXiv:1910.07467", "url": "https://arxiv.org/abs/1910.07467"}]},
+
+    {"id": "mha", "slot": "attn", "cat": "attn", "name": "MHA", "sub": "多头注意力",
+     "paper": "Attention Is All You Need", "year": "2017", "org": "Google",
+     "idea": "Q、K、V 拆成 h 个头并行算注意力，每个头有自己的一套 K/V。",
+     "solves": "单头只能关注一种关系；多头可以同时看语法、指代、位置等不同线索。",
+     "metaphor": "8 个人同时读同一段话，每人各盯一种线索，每人手里一本参考书。",
+     "inNote": "每个 Q 头配一个 K/V 头。KV 缓存最大。",
+     "flow": "多头注意力：每个 token 看序列里所有之前的 token，按相关度汇总信息。",
+     "links": [{"label": "arXiv:1706.03762", "url": "https://arxiv.org/abs/1706.03762"}]},
+    {"id": "mqa", "slot": "attn", "cat": "attn", "name": "MQA", "sub": "多查询注意力",
+     "paper": "Fast Transformer Decoding: One Write-Head is All You Need", "year": "2019", "org": "Google",
+     "idea": "所有查询头共享同一组 K/V。",
+     "solves": "KV 缓存缩小到 1/h，自回归解码快很多；代价是质量略有下降。Gemma 2B、PaLM 采用。",
+     "metaphor": "8 个学生共用一本参考书。",
+     "inNote": "所有 Q 头共享 1 组 K/V。",
+     "flow": "MQA：所有头共用一组 K/V，看的还是全部 token，但缓存小得多。",
+     "links": [{"label": "arXiv:1911.02150", "url": "https://arxiv.org/abs/1911.02150"}]},
+    {"id": "gqa", "slot": "attn", "cat": "attn", "name": "GQA", "sub": "分组查询注意力",
+     "paper": "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints", "year": "2023", "org": "Google Research",
+     "idea": "查询头分组，每组共享一组 K/V（如 LLaMA 3 8B：32 个 Q 头配 8 个 KV 头）。",
+     "solves": "在 MHA 的质量和 MQA 的速度之间取折中。",
+     "metaphor": "每 4 个学生合用一本参考书。",
+     "inNote": "每组 Q 头共享一组 K/V（图中 4 个一组）。",
+     "flow": "GQA：每组注意力头共享一组 K/V，质量接近 MHA，缓存接近 MQA。",
+     "links": [{"label": "arXiv:2305.13245", "url": "https://arxiv.org/abs/2305.13245"}]},
+    {"id": "mla", "slot": "attn", "cat": "attn", "name": "MLA", "sub": "多头潜在注意力",
+     "paper": "DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model", "year": "2024", "org": "DeepSeek-AI",
+     "idea": "把 K/V 联合压缩成一个低维潜向量来缓存，用时再解压到各个头；位置信息用解耦的 RoPE 单独处理。",
+     "solves": "KV 缓存比 MHA 小得多，效果却不输 MHA。DeepSeek-V2/V3 采用。",
+     "metaphor": "不存整本书，只存一份压缩笔记，用的时候再展开。",
+     "inNote": "缓存的是压缩潜向量 c，而不是每个头的 K/V。",
+     "flow": "MLA：K/V 先压缩成一个小潜向量再展开，注意力照算，缓存却小得多。",
+     "links": [{"label": "arXiv:2405.04434", "url": "https://arxiv.org/abs/2405.04434"}]},
+
+    {"id": "relu", "slot": "ffn", "cat": "ffn", "name": "ReLU FFN", "sub": "原始 Transformer · OPT",
+     "paper": "Attention Is All You Need", "year": "2017", "org": "Google",
+     "idea": "两层全连接，中间接 ReLU，维度 d → 4d → d。",
+     "solves": "注意力负责 token 之间交流，FFN 负责对每个 token 单独做非线性加工。",
+     "metaphor": "每块积木进各自的小加工车间。",
+     "inNote": "d → 4d → d，激活函数 ReLU。",
+     "flow": "FFN：每个 token 各自进入两层全连接网络加工。",
+     "links": [{"label": "arXiv:1706.03762", "url": "https://arxiv.org/abs/1706.03762"}]},
+    {"id": "gelu", "slot": "ffn", "cat": "ffn", "name": "GELU FFN", "sub": "BERT · GPT-2",
+     "paper": "Gaussian Error Linear Units (GELUs)", "year": "2016", "org": "UC Berkeley / TTIC", "verify": ["org"],
+     "idea": "把 ReLU 换成平滑的 GELU：按输入大小以概率方式「放行」。",
+     "solves": "比 ReLU 更平滑，BERT 和 GPT-2 采用。",
+     "metaphor": "不是硬开关，而是一个渐变的调光旋钮。",
+     "inNote": "d → 4d → d，激活函数 GELU。",
+     "flow": "GELU FFN：每个 token 各自过一个平滑激活的两层网络。",
+     "links": [{"label": "arXiv:1606.08415", "url": "https://arxiv.org/abs/1606.08415"}]},
+    {"id": "swiglu", "slot": "ffn", "cat": "ffn", "name": "SwiGLU", "sub": "LLaMA 系",
+     "paper": "GLU Variants Improve Transformer", "year": "2020", "org": "Google",
+     "idea": "两条并行的线性支路：一支过 Swish 当「门」，与另一支逐元素相乘，再投影回去。",
+     "solves": "同等参数量下效果优于 ReLU/GELU FFN，LLaMA 系标配。",
+     "metaphor": "加工车间多了一个阀门，决定哪些信息放行。",
+     "inNote": "Swish(xW₁) ⊙ (xW₃) → W₂",
+     "flow": "SwiGLU FFN：一支当门控，一支当内容，两者相乘后再投影。",
+     "links": [{"label": "arXiv:2002.05202", "url": "https://arxiv.org/abs/2002.05202"}]},
+    {"id": "geglu", "slot": "ffn", "cat": "ffn", "name": "GeGLU", "sub": "Gemma",
+     "paper": "GLU Variants Improve Transformer", "year": "2020", "org": "Google",
+     "idea": "GLU 变体，门控支路用 GELU。",
+     "solves": "和 SwiGLU 同一思路；Gemma 采用。",
+     "metaphor": "同样是带阀门的车间，只是阀门手感更柔和。",
+     "inNote": "GELU(xW₁) ⊙ (xW₃) → W₂",
+     "flow": "GeGLU FFN：GELU 门控支路乘以内容支路。",
+     "links": [{"label": "arXiv:2002.05202", "url": "https://arxiv.org/abs/2002.05202"}]},
+    {"id": "moe", "slot": "ffn", "cat": "ffn", "name": "MoE 8 选 2", "sub": "Mixtral",
+     "paper": "Mixtral of Experts（稀疏门控 MoE 最早见 Shazeer et al. 2017）", "year": "2024", "org": "Mistral AI",
+     "idea": "每层放 8 个 SwiGLU 专家，路由器为每个 token 选 Top-2，按权重加起来。",
+     "solves": "参数量大幅增加，而每个 token 的计算量基本不变。",
+     "metaphor": "8 个车间，调度员给每块积木只派 2 个车间。",
+     "inNote": "路由器 → Top-2 / 8 专家，加权求和。",
+     "flow": "MoE：路由器给每个 token 挑 2 个专家，只有被选中的专家参与计算。",
+     "links": [{"label": "Mixtral arXiv:2401.04088", "url": "https://arxiv.org/abs/2401.04088"}, {"label": "Sparsely-Gated MoE arXiv:1701.06538", "url": "https://arxiv.org/abs/1701.06538"}]},
+    {"id": "dsmoe", "slot": "ffn", "cat": "ffn", "name": "DeepSeekMoE", "sub": "共享 + 细粒度专家",
+     "paper": "DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models", "year": "2024", "org": "DeepSeek-AI",
+     "idea": "把专家切得更细、数量更多，同时保留少量始终激活的共享专家。V3 为 1 个共享 + 256 个路由专家，每 token 激活 8 个。",
+     "solves": "专家分工更专一，减少不同专家重复学同样的通用知识。",
+     "metaphor": "常驻全科医生 + 很多细分专科。",
+     "inNote": "共享专家始终参与 + Top-k 细粒度路由专家（图为示意）。",
+     "flow": "DeepSeekMoE：共享专家处理通用知识，再从很多小专家里挑几个精细加工。",
+     "links": [{"label": "arXiv:2401.06066", "url": "https://arxiv.org/abs/2401.06066"}]},
+
+    {"id": "lm_head", "slot": "head", "cat": "text", "name": "LM Head", "sub": "语言模型头 · 输出文字",
+     "paper": "自回归语言模型的标准输出层", "year": "—", "org": "—",
+     "idea": "一个线性层把最后的隐藏向量映射成词表大小的 logits，softmax 后采样下一个词。",
+     "solves": "把向量变回文字；常和输入词嵌入共享权重。",
+     "metaphor": "从所有积木里挑出最可能的下一块，接上去，再挑下一块。",
+     "flow": "LM Head 给整个词表打分，挑出下一个词，接回输入继续生成（自回归）。",
+     "links": [{"label": "GPT-2 论文 PDF", "url": "https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf"}]},
+    {"id": "discrete_action", "slot": "head", "cat": "action", "name": "离散动作 Token", "sub": "RT-2 · OpenVLA",
+     "paper": "RT-2: Vision-Language-Action Models Transfer Web Knowledge to Robotic Control；OpenVLA", "year": "2023（RT-2）/ 2024（OpenVLA）", "org": "Google DeepMind；Stanford 等（OpenVLA）",
+     "idea": "每个动作维度（位移、旋转、夹爪）离散成 256 个区间，每个区间对应词表里的一个 token，模型像说话一样「说出」动作。",
+     "solves": "不改模型结构，直接复用 VLM 的语言头输出机器人动作。OpenVLA 把 Llama 词表里最少用的 256 个 token 改作动作 token。",
+     "metaphor": "把方向盘角度写成 0–255 的数字，一个一个念出来。",
+     "flow": "模型逐个「说出」7 个动作 token（Δx Δy Δz Δroll Δpitch Δyaw 夹爪），再还原成连续动作。",
+     "links": [{"label": "RT-2 arXiv:2307.15818", "url": "https://arxiv.org/abs/2307.15818"}, {"label": "OpenVLA arXiv:2406.09246", "url": "https://arxiv.org/abs/2406.09246"}]},
+    {"id": "fast", "slot": "head", "cat": "action", "name": "FAST 动作分词", "sub": "π0-FAST",
+     "paper": "FAST: Efficient Action Tokenization for Vision-Language-Action Models", "year": "2025", "org": "Physical Intelligence 等", "verify": ["org", "links"],
+     "idea": "对一段动作块做离散余弦变换（DCT），量化后再用 BPE 压缩成少量 token。",
+     "solves": "逐步逐维分箱在高频控制下 token 冗余、难学；FAST 让自回归 VLA 也能学灵巧的高频任务。",
+     "metaphor": "像 JPEG 压缩图片那样压缩一段动作轨迹。",
+     "flow": "动作块被 DCT 压缩成少量 token，自回归生成后再逆变换还原成轨迹。",
+     "links": [{"label": "arXiv:2501.09747", "url": "https://arxiv.org/abs/2501.09747"}]},
+    {"id": "flow_expert", "slot": "head", "cat": "action", "name": "Flow Matching 动作专家", "sub": "π0 · 输出动作块",
+     "paper": "π0: A Vision-Language-Action Flow Model for General Robot Control", "year": "2024", "org": "Physical Intelligence",
+     "idea": "单独一个约 3 亿参数的动作专家，和 VLM 共享注意力；从噪声出发沿学到的速度场积分，一次生成 50 步连续动作块（action chunk）。",
+     "solves": "离散 token 难以表达高频连续动作；flow matching 直接输出平滑的连续动作（最高 50Hz 控制）。",
+     "metaphor": "从一团乱麻开始，按着「往哪拉」的指引，几步就理顺成一条轨迹。",
+     "flow": "从高斯噪声开始，动作专家预测速度场，积分约 10 步得到 50 步动作块。",
+     "links": [{"label": "π0 arXiv:2410.24164", "url": "https://arxiv.org/abs/2410.24164"}, {"label": "Flow Matching arXiv:2210.02747", "url": "https://arxiv.org/abs/2210.02747"}]},
+    {"id": "diffusion", "slot": "head", "cat": "action", "name": "Diffusion 动作头", "sub": "Octo · Diffusion Policy",
+     "paper": "Diffusion Policy: Visuomotor Policy Learning via Action Diffusion；Octo: An Open-Source Generalist Robot Policy", "year": "2023（Diffusion Policy）/ 2024（Octo）",
+     "org": "Columbia / TRI / MIT（Diffusion Policy）；UC Berkeley 等（Octo）", "verify": ["org"],
+     "idea": "把动作生成当作去噪：从噪声开始逐步去噪，得到一段动作序列。",
+     "solves": "能表达多峰动作分布（同一场景可以左绕也可以右绕），避免回归把两种走法平均成撞墙。",
+     "metaphor": "雕塑家从一块乱石开始，一刀刀凿出动作。",
+     "flow": "扩散头从噪声开始多步去噪，得到一段动作序列。",
+     "links": [{"label": "Diffusion Policy arXiv:2303.04137", "url": "https://arxiv.org/abs/2303.04137"}, {"label": "Octo arXiv:2405.12213", "url": "https://arxiv.org/abs/2405.12213"}]},
+
+    {"id": "pretrain", "slot": "recipe", "cat": "recipe", "name": "预训练", "sub": "Pre-training",
+     "paper": "GPT 系列等", "year": "2018–", "org": "—",
+     "idea": "在海量无标注文本（或图文）上「预测下一个 token」。",
+     "solves": "让模型先学会语言和世界知识，后面的微调才有底子。",
+     "metaphor": "先通读整座图书馆。",
+     "links": [{"label": "GPT-2 论文 PDF", "url": "https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf"}]},
+    {"id": "sft", "slot": "recipe", "cat": "recipe", "name": "SFT", "sub": "监督微调",
+     "paper": "Training language models to follow instructions with human feedback（InstructGPT）", "year": "2022", "org": "OpenAI",
+     "idea": "用人工写的「指令 → 回答」示范数据微调模型。",
+     "solves": "预训练模型只会接龙，SFT 教它按指令回答。",
+     "metaphor": "看完书后，跟着老师做例题。",
+     "links": [{"label": "arXiv:2203.02155", "url": "https://arxiv.org/abs/2203.02155"}]},
+    {"id": "rlhf", "slot": "recipe", "cat": "recipe", "name": "RLHF", "sub": "人类反馈强化学习",
+     "paper": "InstructGPT；Deep RL from Human Preferences（Christiano et al.）", "year": "2017 / 2022", "org": "OpenAI / DeepMind",
+     "idea": "先训练奖励模型学习人类偏好，再用强化学习（如 PPO）优化模型。",
+     "solves": "让回答更符合人类偏好：有用、无害、诚实。",
+     "metaphor": "写完作文让老师打分，按分数改写作习惯。",
+     "links": [{"label": "arXiv:2203.02155", "url": "https://arxiv.org/abs/2203.02155"}, {"label": "arXiv:1706.03741", "url": "https://arxiv.org/abs/1706.03741"}]},
+    {"id": "dpo", "slot": "recipe", "cat": "recipe", "name": "DPO", "sub": "直接偏好优化",
+     "paper": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model", "year": "2023", "org": "Stanford University",
+     "idea": "不单独训练奖励模型，直接用「好回答 / 差回答」偏好对构造分类式损失来优化模型。",
+     "solves": "比 RLHF 简单稳定，不需要强化学习循环。",
+     "metaphor": "不打分，直接给两份作文说「这份比那份好」。",
+     "links": [{"label": "arXiv:2305.18290", "url": "https://arxiv.org/abs/2305.18290"}]},
+    {"id": "oxe", "slot": "recipe", "cat": "recipe", "name": "Open X-Embodiment", "sub": "机器人数据",
+     "paper": "Open X-Embodiment: Robotic Learning Datasets and RT-X Models", "year": "2023", "org": "Google DeepMind 等数十家机构", "verify": ["org"],
+     "idea": "汇集 22 种机器人形态、100 万条以上轨迹的开放数据集。",
+     "solves": "单个实验室的数据太少；跨机器人数据让策略学到更通用的操作。OpenVLA 用其中约 97 万条轨迹训练。",
+     "metaphor": "全世界的机器人把自己的练习录像放进同一个视频库。",
+     "links": [{"label": "arXiv:2310.08864", "url": "https://arxiv.org/abs/2310.08864"}]}
+  ],
+
+  "presets": [
+    {"id": "gpt2", "hotkey": "1", "name": "GPT-2", "kind": "LLM",
+     "slots": {"tokenizer": "bytebpe", "vision": null, "connector": null, "proprio": null, "backbone": "gpt2", "head": "lm_head"},
+     "inner": {"pos": "learned", "norm": "preln", "attn": "mha", "ffn": "gelu"}, "recipe": ["pretrain"],
+     "talk": ["纯文本、仅解码器：只做一件事，预测下一个词。", "Block 里四块零件是 2019 年的标准配置：可学习位置、Pre-LN、MHA、GELU FFN。", "后面所有模型都可以看成在这块底板上换积木。"],
+     "evoNote": "起点：2019 年的 GPT-2，一台纯文本的「接龙机器」。"},
+    {"id": "llama3", "hotkey": "2", "name": "LLaMA 3", "kind": "LLM",
+     "slots": {"tokenizer": "tiktoken", "vision": null, "connector": null, "proprio": null, "backbone": "llama3", "head": "lm_head"},
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "gqa", "ffn": "swiglu"}, "recipe": ["pretrain", "sft", "dpo"],
+     "talk": ["外形和 GPT-2 一样，Block 内部四块零件全部换成新一代。", "RoPE 管相对位置，RMSNorm 更省，GQA 让 KV 缓存变小，SwiGLU 让 FFN 更强。", "后训练用 SFT + 拒绝采样 + DPO。"],
+     "evoNote": "同样是预测下一个词，但 Block 内部换成 RoPE、RMSNorm、GQA、SwiGLU，分词器换成 128K tiktoken。"},
+    {"id": "mixtral", "hotkey": "3", "name": "Mixtral 8x7B", "kind": "LLM",
+     "slots": {"tokenizer": "sp_bpe", "vision": null, "connector": null, "proprio": null, "backbone": "mixtral", "head": "lm_head"},
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "gqa", "ffn": "moe"}, "recipe": ["pretrain"],
+     "talk": ["和 LLaMA 只差一块积木：FFN 换成 MoE。", "8 个专家，每个 token 只用 2 个：总参数 47B，激活约 13B。"],
+     "evoNote": "只换 FFN：稠密 FFN 变成 8 选 2 的 MoE。"},
+    {"id": "dsv3", "hotkey": "4", "name": "DeepSeek-V3", "kind": "LLM",
+     "slots": {"tokenizer": "bytebpe", "vision": null, "connector": null, "proprio": null, "backbone": "dsv3", "head": "lm_head"},
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "mla", "ffn": "dsmoe"}, "recipe": ["pretrain", "sft", "rlhf"],
+     "talk": ["注意力换成 MLA：缓存压缩潜向量，省显存。", "FFN 换成 DeepSeekMoE：1 个共享专家 + 256 个路由专家，每 token 激活 8 个。", "671B 总参数，每 token 激活 37B。"],
+     "evoNote": "注意力换 MLA，FFN 换 DeepSeekMoE。"},
+    {"id": "llava15", "hotkey": "5", "name": "LLaVA-1.5", "kind": "VLM",
+     "slots": {"tokenizer": "sp_bpe", "vision": "clip_vit", "connector": "mlp2", "proprio": null, "backbone": "vicuna", "head": "lm_head"},
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "mha", "ffn": "swiglu"}, "recipe": ["pretrain", "sft"],
+     "talk": ["VLM = 视觉编码器 + 转接头 + LLM。", "CLIP ViT-L/14（336px）把图变成 576 个 patch 特征，两层 MLP 把它们投影成 LLM 的「视觉 token」。", "两阶段训练：先只训转接头做对齐，再做视觉指令微调。"],
+     "evoNote": "装上眼睛：CLIP ViT + 两层 MLP 转接头；语言主干换成 Vicuna v1.5（Llama 2 系，7B/13B 用 MHA，SentencePiece 词表）。"},
+    {"id": "blip2", "hotkey": "6", "name": "BLIP-2", "kind": "VLM",
+     "slots": {"tokenizer": "bytebpe", "vision": "vit", "connector": "qformer", "proprio": null, "backbone": "opt", "head": "lm_head"},
+     "inner": {"pos": "learned", "norm": "preln", "attn": "mha", "ffn": "relu"}, "recipe": ["pretrain"],
+     "alt": {"vision": ["vit", "clip_vit"], "tokenizer": ["bytebpe", "sp_bpe"]},
+     "talk": ["视觉编码器（EVA-CLIP ViT-g/14）和 LLM（OPT / FlanT5）都冻结。", "只训练 Q-Former：32 个查询把图像压缩成 32 个 token。", "和 LLaVA 对比：LLaVA 的转接头不压缩 token 数。"],
+     "evoNote": "转接头换成 Q-Former，把图像压缩成 32 个查询 token。"},
+    {"id": "rt2", "hotkey": "7", "name": "RT-2", "kind": "VLA",
+     "slots": {"tokenizer": "sp_bpe", "vision": "vit", "connector": "linear", "proprio": null, "backbone": "palix", "head": "discrete_action"},
+     "inner": {"pos": "rope", "norm": "preln", "attn": "mqa", "ffn": "swiglu"}, "recipe": ["pretrain", "sft"],
+     "ignore": ["connector"],
+     "talk": ["第一个把 VLM 直接变成机器人策略的代表工作。", "动作每维离散成 256 个区间，当成文字 token 输出。", "和网页数据联合微调（co-fine-tuning），保留互联网知识。"],
+     "evoNote": "输出从文字换成离散动作 token。"},
+    {"id": "openvla", "hotkey": "8", "name": "OpenVLA", "kind": "VLA",
+     "slots": {"tokenizer": "sp_bpe", "vision": "dino_siglip", "connector": "mlp2", "proprio": null, "backbone": "llama2", "head": "discrete_action"},
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "mha", "ffn": "swiglu"}, "recipe": ["oxe"],
+     "talk": ["7B 开源 VLA：Prismatic VLM（DINOv2 + SigLIP 双编码器 + MLP + Llama 2 7B）。", "动作 7 维，每维 256 个区间，占用 Llama 词表里最少用的 256 个 token。", "在 Open X-Embodiment 约 97 万条轨迹上训练。"],
+     "evoNote": "从看图说话到看图动手：视觉换成 DINOv2 + SigLIP 双编码器，主干换成 Llama 2 7B，输出换成离散动作 token。"},
+    {"id": "pi0", "hotkey": "9", "name": "π0", "kind": "VLA",
+     "slots": {"tokenizer": "sp_bpe", "vision": "siglip", "connector": "linear", "proprio": "proprio_state", "backbone": "gemma", "head": "flow_expert"},
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "mqa", "ffn": "geglu"}, "recipe": ["pretrain", "oxe"],
+     "talk": ["底座是 PaliGemma 3B：SigLIP + 线性投影 + Gemma 2B。", "加入本体感知状态输入；输出换成约 3 亿参数的 Flow Matching 动作专家。", "一次输出 50 步的动作块（action chunk），可做 50Hz 高频控制。"],
+     "evoNote": "动作从「说出来」变成「画出来」：加入机器人状态，Flow Matching 动作专家一次输出 50 步连续动作块。"},
+    {"id": "pi0fast", "hotkey": "0", "name": "π0-FAST", "kind": "VLA",
+     "slots": {"tokenizer": "sp_bpe", "vision": "siglip", "connector": "linear", "proprio": "proprio_state", "backbone": "gemma", "head": "fast"},
+     "inner": {"pos": "rope", "norm": "rmsnorm", "attn": "mqa", "ffn": "geglu"}, "recipe": ["pretrain", "oxe"],
+     "ignore": ["proprio"],
+     "talk": ["和 π0 共用 PaliGemma 视觉语言部分。", "输出头换成 FAST：DCT + BPE 压缩动作块，重新回到自回归 token。", "训练比 flow matching 版本快，推理要逐 token 生成。"],
+     "evoNote": "输出头换成 FAST 动作分词。"}
+  ],
+
+  "evolution": ["gpt2", "llama3", "llava15", "openvla", "pi0"]
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;800;900&display=swap" rel="stylesheet">
+<style>
+/* 布局：顶部控制条 → 中间按比例缩放的乐高底板舞台（左输入 → 中主干 → 右输出）→ 底部零件库；右侧可开关讲解提示栏 */
+:root{
+  --bench:#191d24; --bench-2:#232933; --bench-3:#2d3440; --line:#3a4250;
+  --ink:#f3f5f7; --ink-dim:#a8b0bc; --ink-dark:#1b1d21;
+  --plate:#9ba2ab; --plate-lo:#878e98; --socket:#7c838d;
+  --c-input:#1d6fd8; --c-connector:#f2c12e; --c-backbone:#59626f;
+  --c-pos:#7a4fd8; --c-norm:#0f9f96; --c-attn:#d33a2f; --c-ffn:#cf4380;
+  --c-text:#2b9a46; --c-action:#ec7614; --c-recipe:#cdd2d9;
+  --warn:#ff5b4f; --okc:#86e09a; --gold:#ffd166;
+  --f-ui:"Nunito","PingFang SC","Microsoft YaHei","Noto Sans SC","Hiragino Sans GB",system-ui,sans-serif;
+  --f-mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bench);color:var(--ink);font-family:var(--f-ui);font-size:15px;overflow:hidden;
+  display:flex;flex-direction:column;user-select:none;-webkit-user-select:none}
+button{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+
+/* ---------- 顶部 ---------- */
+header{display:flex;flex-direction:column;gap:8px;padding:10px max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));
+  background:var(--bench-2);border-bottom:1px solid var(--line)}
+.row1{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+h1{margin:0;font-size:21px;font-weight:900;letter-spacing:.02em;white-space:nowrap;display:flex;align-items:center;gap:10px}
+h1 .logo{display:inline-flex;gap:3px;padding:6px 7px 4px;background:var(--c-attn);border-radius:5px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
+h1 .logo i{width:9px;height:9px;border-radius:50%;background:#ef6a60;box-shadow:inset 0 -2px 0 rgba(0,0,0,.25)}
+h1 small{font-weight:700;color:var(--ink-dim);font-size:15px}
+#badge{flex:1;min-width:220px;display:flex;justify-content:center}
+.badge{display:inline-flex;align-items:center;gap:10px;padding:7px 16px;border-radius:999px;font-weight:800;font-size:17px;
+  background:var(--bench-3);color:var(--ink-dim);border:1px solid var(--line);max-width:100%}
+.badge.full{background:var(--gold);color:var(--ink-dark);border-color:transparent;animation:pop .5s}
+.badge.near{background:#3b3320;color:var(--gold);border-color:#6b5a2a}
+.badge.near{flex-direction:column;align-items:flex-start;gap:2px;border-radius:14px;padding:6px 16px;max-width:min(760px,100%)}
+.badge .nm{white-space:nowrap}
+.badge .pct{font-family:var(--f-mono);font-size:14px;background:rgba(255,209,102,.18);border-radius:5px;padding:0 6px;margin-left:4px}
+.badge .diff{font-weight:700;font-size:14px;color:#efe2b8;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+#badge{gap:8px;align-items:center}
+.simbtn{flex:none;background:var(--bench-3);border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;font-weight:800;font-size:13px;color:var(--ink-dim);white-space:nowrap}
+.simbtn:hover,.simbtn.on{color:var(--ink);background:#384050}
+#sim{position:fixed;z-index:450;background:var(--bench-2);border:1px solid var(--line);border-radius:14px;box-shadow:0 16px 40px rgba(0,0,0,.6);
+  padding:10px;display:flex;flex-direction:column;gap:4px;max-height:calc(100vh - 140px);overflow:auto}
+.sim-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:2px 6px 6px}
+.sim-h b{font-size:16px}.sim-h span{font-size:12px;color:var(--ink-dim)}
+.sim-row{display:grid;grid-template-columns:22px 150px 1fr 64px;grid-template-areas:"rk sn bar sp" ". sd sd sd";gap:2px 10px;align-items:center;
+  text-align:left;background:transparent;border:none;border-radius:10px;padding:7px 8px;cursor:pointer}
+.sim-row:hover{background:var(--bench-3)}
+.sim-row.hit{background:rgba(255,209,102,.12)}
+.sim-row .rk{grid-area:rk;font-family:var(--f-mono);color:var(--ink-dim);font-size:13px}
+.sim-row .sn{grid-area:sn;font-weight:900;font-size:15px;display:flex;align-items:center;gap:6px;min-width:0}
+.sim-row .sn em{font-style:normal;font-size:10px;font-weight:800;padding:1px 5px;border-radius:4px;background:#4b5563}
+.sim-row .sn em[data-kind=VLM]{background:#2a64b8}.sim-row .sn em[data-kind=VLA]{background:#c4640f}
+.sim-row .bar{grid-area:bar;height:10px;border-radius:5px;background:var(--bench-3);overflow:hidden}
+.sim-row .bar i{display:block;height:100%;background:var(--gold);border-radius:5px}
+.sim-row .sp{grid-area:sp;font-family:var(--f-mono);font-weight:800;font-size:14px;text-align:right;font-variant-numeric:tabular-nums}
+.sim-row .sp small{display:block;font-size:10px;color:var(--ink-dim);font-weight:600}
+.sim-row .sd{grid-area:sd;font-size:13px;color:var(--ink-dim);line-height:1.45;min-width:0}
+.ctrls{display:flex;gap:6px;flex-wrap:wrap}
+.btn{background:var(--bench-3);border:1px solid var(--line);border-radius:8px;padding:6px 11px;cursor:pointer;font-weight:700;font-size:14px;
+  display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:#384050}
+.btn kbd{font-family:var(--f-mono);font-size:11px;color:var(--ink-dim);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.btn.primary{background:var(--c-text);border-color:transparent}
+.btn.primary:hover{background:#33ad52}
+.btn.on{background:var(--gold);color:var(--ink-dark);border-color:transparent}
+.btn.on kbd{color:var(--ink-dark);border-color:rgba(0,0,0,.3)}
+.presets{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.presets .lbl{color:var(--ink-dim);font-size:13px;font-weight:700;margin-right:2px}
+.pbtn{border:none;border-radius:6px;padding:5px 10px 4px;cursor:pointer;font-weight:800;font-size:14px;color:#fff;position:relative;
+  background:var(--pc,#555);box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
+.pbtn .k{font-family:var(--f-mono);font-size:11px;opacity:.75;margin-right:5px}
+.pbtn.active{outline:3px solid var(--gold);outline-offset:1px}
+.pbtn[data-kind=LLM]{--pc:#4b5563}.pbtn[data-kind=VLM]{--pc:#2a64b8}.pbtn[data-kind=VLA]{--pc:#c4640f}
+
+/* ---------- 主体 ---------- */
+main{flex:1;min-height:0;display:flex}
+#stageWrap{flex:1;min-width:0;position:relative;overflow:hidden}
+#stage{position:absolute;left:0;top:0;width:1440px;height:660px;transform-origin:0 0;border-radius:18px;
+  background-color:var(--plate);
+  background-image:radial-gradient(circle at 50% 42%,rgba(255,255,255,.30) 0 4.5px,transparent 5.5px),
+                   radial-gradient(circle at 50% 56%,rgba(0,0,0,.16) 0 5.5px,transparent 6.5px);
+  background-size:24px 24px;box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 -6px 0 var(--plate-lo)}
+.zone{position:absolute;top:18px;font-weight:900;font-size:15px;letter-spacing:.12em;color:#3b414a;text-transform:uppercase;transition:opacity .3s}
+.zone span{letter-spacing:0;font-size:16px;margin-right:6px;color:#2e333a}
+#stage.flowing .zone{opacity:0}
+
+/* 插槽 */
+.slot{position:absolute;border-radius:12px;background:var(--socket);
+  box-shadow:inset 0 3px 8px rgba(0,0,0,.35),inset 0 -1px 0 rgba(255,255,255,.15);transition:box-shadow .2s, transform .2s}
+.slot-label{position:absolute;left:8px;right:8px;top:6px;height:22px;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:800;color:#f2f4f6;
+  pointer-events:auto}
+.slot-label .dot{width:10px;height:10px;border-radius:3px;background:var(--c);flex:none}
+.slot-label>span:not(.dot),.slot-label{white-space:nowrap}
+.slot-label em{min-width:0;font-style:normal;color:#d6dae0;font-weight:600;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot-label .swap{margin-left:auto;background:rgba(0,0,0,.28);border:none;border-radius:5px;padding:1px 7px;cursor:pointer;font-size:12px;font-weight:800;color:#fff;flex:none}
+.slot-label .swap:hover{background:rgba(0,0,0,.5)}
+.socket{position:absolute;left:8px;right:8px;top:36px;bottom:8px;border-radius:8px;display:flex;align-items:center;justify-content:center}
+.socket.empty{border:2px dashed rgba(255,255,255,.35);cursor:pointer;color:rgba(255,255,255,.75);font-size:13px;font-weight:700;text-align:center;padding:4px}
+.socket.empty:hover{border-color:#fff;color:#fff}
+.slot.can-drop{box-shadow:inset 0 3px 8px rgba(0,0,0,.35),0 0 0 3px rgba(134,224,154,.75)}
+.slot.hover-ok{box-shadow:inset 0 3px 8px rgba(0,0,0,.35),0 0 0 4px var(--okc),0 0 18px var(--okc);transform:scale(1.02)}
+.slot.hover-bad,.slot.bad{box-shadow:inset 0 3px 8px rgba(0,0,0,.35),0 0 0 4px var(--warn),0 0 18px var(--warn)}
+.slot.bad{animation:shake .42s}
+.slot.changed{animation:glow 1s ease-in-out 3}
+.slot.flow-focus{box-shadow:inset 0 3px 8px rgba(0,0,0,.35),0 0 0 4px var(--gold),0 0 26px rgba(255,209,102,.8)}
+
+/* 积木 */
+.brick{--c:var(--c-backbone);position:relative;background:var(--c);border-radius:7px;color:#fff;cursor:grab;
+  box-shadow:inset 0 -5px 0 rgba(0,0,0,.24),inset 0 2px 0 rgba(255,255,255,.28),0 4px 8px rgba(0,0,0,.35);
+  display:flex;align-items:center;padding:10px 12px 12px;touch-action:none}
+.brick:active{cursor:grabbing}
+.brick .studs{position:absolute;top:-8px;left:12px;right:12px;display:flex;justify-content:space-around;pointer-events:none}
+.brick .studs i{width:20px;height:9px;border-radius:4px 4px 1px 1px;background:linear-gradient(color-mix(in srgb,var(--c),#fff 38%),var(--c));
+  box-shadow:inset 0 -2px 0 rgba(0,0,0,.2)}
+.brick .face{display:flex;flex-direction:column;min-width:0;line-height:1.15}
+.brick .face b{font-size:17px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brick .face small{font-size:12px;font-weight:700;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.socket>.brick{width:100%;height:100%}
+.brick[data-cat=input]{--c:var(--c-input)}.brick[data-cat=connector]{--c:var(--c-connector);color:var(--ink-dark)}
+.brick[data-cat=backbone]{--c:var(--c-backbone)}.brick[data-cat=pos]{--c:var(--c-pos)}.brick[data-cat=norm]{--c:var(--c-norm)}
+.brick[data-cat=attn]{--c:var(--c-attn)}.brick[data-cat=ffn]{--c:var(--c-ffn)}.brick[data-cat=text]{--c:var(--c-text)}
+.brick[data-cat=action]{--c:var(--c-action)}.brick[data-cat=recipe]{--c:var(--c-recipe);color:var(--ink-dark)}
+.brick.mini{padding:8px 10px 10px;min-width:118px;max-width:190px}
+.brick.mini .face b{font-size:14px}.brick.mini .face small{font-size:11px}
+.brick.mini .studs i{width:14px;height:7px}.brick.mini .studs{top:-6px}
+.brick.inuse::after{content:"";position:absolute;right:5px;top:5px;width:9px;height:9px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 2px rgba(0,0,0,.3)}
+.brick.snap{animation:snap .42s cubic-bezier(.3,1.6,.5,1)}
+.ghost{position:fixed;z-index:1000;pointer-events:none;opacity:.92;transform:rotate(-3deg);box-shadow:0 14px 28px rgba(0,0,0,.5)}
+.flyer{position:fixed;z-index:999;pointer-events:none;margin:0}
+
+/* 源数据卡 */
+.src{position:absolute;border-radius:10px;background:#eef1f4;color:var(--ink-dark);padding:8px 10px;box-shadow:0 3px 0 rgba(0,0,0,.2);transition:opacity .3s}
+.src h4{margin:0 0 4px;font-size:12px;font-weight:900;letter-spacing:.06em;color:#4a5260}
+.src p{margin:0;font-size:15px;font-weight:800;line-height:1.3}
+.src.dim{opacity:.35}
+.src .mono{font-family:var(--f-mono);font-size:12px;font-weight:600;color:#33404f}
+.src svg{display:block;width:100%;height:auto;border-radius:6px}
+
+/* 主干 */
+.bb-layer{position:absolute;border-radius:12px;background:#666d77;box-shadow:inset 0 -5px 0 rgba(0,0,0,.25),0 3px 6px rgba(0,0,0,.25)}
+.bb-model{position:absolute;left:12px;right:12px;top:40px;height:64px;display:flex}
+.bb-model>.brick{width:100%}
+.bb-model.empty{border:2px dashed rgba(255,255,255,.4);border-radius:8px;align-items:center;justify-content:center;color:rgba(255,255,255,.8);font-weight:700;font-size:13px;cursor:pointer;text-align:center}
+.bb-chips{position:absolute;left:12px;right:12px;top:116px;display:flex;flex-direction:column;gap:8px}
+.chip-slot{height:48px;border-radius:8px;position:relative;display:flex;transition:box-shadow .2s}
+.chip-slot>.brick{width:100%;padding:6px 10px 8px}
+.chip-slot>.brick .face{flex-direction:row;align-items:baseline;gap:8px}
+.chip-slot>.brick .face b{font-size:15px}
+.chip-slot>.brick .face small{display:none}
+.chip-slot .tag{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:11px;font-weight:800;opacity:.8;pointer-events:none}
+.chip-slot.empty{border:2px dashed rgba(255,255,255,.4);align-items:center;padding-left:12px;font-size:13px;font-weight:700;color:rgba(255,255,255,.8);cursor:pointer}
+.chip-slot.can-drop{box-shadow:0 0 0 3px rgba(134,224,154,.75)}
+.chip-slot.hover-ok{box-shadow:0 0 0 4px var(--okc),0 0 14px var(--okc)}
+.chip-slot.hover-bad,.chip-slot.bad{box-shadow:0 0 0 4px var(--warn)}
+.chip-slot.bad{animation:shake .42s}
+.chip-slot.flow-focus{box-shadow:0 0 0 4px var(--gold),0 0 20px rgba(255,209,102,.9)}
+.chip-slot.changed{animation:glow 1s ease-in-out 3}
+.bb-foot{position:absolute;left:12px;right:12px;top:334px;height:30px;display:flex;align-items:center;gap:8px}
+.layers{font-weight:900;font-size:15px;background:#2d333c;color:var(--gold);padding:3px 9px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+.expand{margin-left:auto;background:var(--gold);color:var(--ink-dark);border:none;border-radius:6px;padding:4px 10px;font-weight:900;cursor:pointer;font-size:13px;white-space:nowrap}
+.bb-tokzone{position:absolute;left:12px;right:12px;top:372px;bottom:10px;border-radius:8px;background:rgba(0,0,0,.14)}
+
+/* 输出端 */
+.outzone{position:absolute;border-radius:12px;background:rgba(40,46,55,.82);padding:10px;color:var(--ink)}
+.outzone h4{margin:0;font-size:13px;font-weight:900;letter-spacing:.04em;color:#d9dde3;display:flex;align-items:center;gap:6px}
+.outzone h4 .dot{width:10px;height:10px;border-radius:3px}
+.out-text,.out-act{position:absolute;left:10px;right:10px;border-radius:8px;background:rgba(0,0,0,.25);transition:opacity .3s}
+.out-text{top:34px;height:150px}
+.out-act-h{position:absolute;left:10px;top:200px}
+.out-act{top:224px;bottom:10px}
+.outzone .dimmed{opacity:.35}
+.arm{position:absolute;left:0;right:0;bottom:6px;margin:auto;width:150px}
+.arm .j1,.arm .j2,.arm .grip{transform-box:view-box}
+.arm .j1{transform-origin:75px 160px}.arm .j2{transform-origin:75px 98px}.arm .grip{transform-origin:118px 72px}
+.arm.moving .j1{animation:j1 2.2s ease-in-out infinite alternate}
+.arm.moving .j2{animation:j2 2.2s ease-in-out infinite alternate}
+.arm.moving .grip{animation:gr 1.1s ease-in-out infinite alternate}
+
+/* 线路 */
+#wires{position:absolute;inset:0;pointer-events:none}
+#wires path{fill:none;stroke:#6a717b;stroke-width:5;stroke-linecap:round;stroke-dasharray:2 10;opacity:.7}
+#wires path.on{stroke:#f4f6f8;stroke-dasharray:none;opacity:.9}
+
+/* token 动画层 */
+#tokLayer{position:absolute;inset:0;pointer-events:none;z-index:20}
+.tok{position:absolute;left:0;top:0;height:28px;min-width:28px;padding:0 7px;border-radius:5px;display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:900;color:#fff;white-space:nowrap;
+  transition:transform .8s cubic-bezier(.45,0,.2,1),opacity .5s,background .5s,width .5s,height .5s;
+  box-shadow:inset 0 -3px 0 rgba(0,0,0,.25),0 2px 4px rgba(0,0,0,.3)}
+.tok::before{content:"";position:absolute;top:-4px;left:50%;width:10px;height:4px;margin-left:-5px;border-radius:2px 2px 0 0;background:inherit;filter:brightness(1.2)}
+.tok.notr{transition:none!important}
+.t-text{background:var(--c-input)}
+.t-patch{width:28px;padding:0;font-size:0}
+.t-vis{background:#2d7fe0;outline:2px solid var(--c-connector);outline-offset:-2px;font-size:11px}
+.t-state{background:#165bb3;font-size:11px}
+.t-out{background:var(--c-text);font-size:15px;height:32px}
+.t-act{background:var(--c-action);font-size:12px}
+.t-noise{background:#7b818b;font-size:11px}
+.tok.fade{opacity:0}
+.tok.pulse{animation:tpulse .9s ease-in-out 2}
+.tok.bb{transform-origin:center}
+.cap{position:absolute;left:196px;right:200px;top:8px;min-height:52px;border-radius:12px;background:var(--bench);color:var(--ink);
+  padding:8px 16px;display:flex;align-items:center;gap:14px;z-index:30;box-shadow:0 6px 18px rgba(0,0,0,.45);font-size:18px;font-weight:700;line-height:1.35}
+.cap .n{font-family:var(--f-mono);font-size:14px;color:var(--gold);white-space:nowrap}
+.cap .t{font-weight:900;color:var(--gold);white-space:nowrap}
+.cap.warn{background:#4a1c19}
+.cap.warn .t{color:#ff9d94}
+
+/* 第二层：Block 内部 */
+#blockView{position:absolute;inset:0;border-radius:18px;z-index:40;background:#3a414b;
+  background-image:radial-gradient(circle at 50% 42%,rgba(255,255,255,.07) 0 4.5px,transparent 5.5px);background-size:24px 24px;
+  opacity:0;transform:scale(.2);pointer-events:none;transition:transform .55s cubic-bezier(.3,1.15,.4,1),opacity .35s}
+#blockView.open{opacity:1;transform:scale(1);pointer-events:auto}
+.bv-top{position:absolute;left:24px;right:24px;top:18px;display:flex;align-items:center;gap:16px}
+.bv-top h2{margin:0;font-size:24px;font-weight:900}
+.bv-top h2 span{color:var(--gold)}
+.bv-top .sub{color:var(--ink-dim);font-weight:700;font-size:15px}
+.bv-frame{position:absolute;left:378px;top:226px;width:1044px;height:250px;border:3px dashed rgba(255,255,255,.35);border-radius:16px}
+.bv-frame b{position:absolute;left:14px;bottom:8px;font-size:14px;color:var(--gold);font-weight:900}
+.bv-frame em{position:absolute;right:14px;bottom:8px;font-size:13px;color:var(--ink-dim);font-style:normal;font-weight:700}
+.bv-el{position:absolute;transition:left .6s cubic-bezier(.5,0,.2,1),top .6s}
+.bv-el.slot{background:#666e79}
+.bv-add{width:50px;height:50px;border-radius:50%;background:#eef1f4;color:var(--ink-dark);display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:900;box-shadow:0 3px 0 rgba(0,0,0,.3)}
+.bv-add small{position:absolute;top:56px;left:50%;transform:translateX(-50%);font-size:12px;color:var(--ink-dim);white-space:nowrap;font-weight:700}
+.bv-pill{background:#eef1f4;color:var(--ink-dark);border-radius:10px;padding:8px 10px;font-weight:900;font-size:14px;text-align:center;line-height:1.25}
+.slot.mirror{opacity:.75}
+.slot.mirror .slot-label em::after{content:" · 同一块"}
+#bvSvg{position:absolute;inset:0;pointer-events:none}
+#bvSvg .main{stroke:#eef1f4;stroke-width:5;fill:none}
+#bvSvg .res{stroke:var(--gold);stroke-width:5;fill:none;stroke-dasharray:12 8;transition:d .6s}
+#bvSvg text{fill:var(--gold);font-size:15px;font-weight:900;font-family:var(--f-ui)}
+.bv-notes{position:absolute;left:24px;right:18px;top:500px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.note{background:rgba(0,0,0,.28);border-radius:12px;padding:10px 12px;min-height:146px;display:flex;flex-direction:column;gap:4px}
+.note h5{margin:0;font-size:14px;font-weight:900;display:flex;align-items:center;gap:6px}
+.note h5 .dot{width:10px;height:10px;border-radius:3px}
+.note p{margin:0;font-size:14px;color:#dfe3e8;line-height:1.4;font-weight:600}
+.note svg{margin-top:auto;width:100%;height:64px}
+.note svg text{font-family:var(--f-ui);font-weight:800}
+
+/* 零件库 */
+#lib{height:236px;flex:none;background:var(--bench-2);border-top:1px solid var(--line);display:flex;flex-direction:column;
+  padding:8px max(16px,env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.lib-tabs{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.lib-tabs h3{margin:0 10px 0 0;font-size:15px;font-weight:900}
+.tab{background:transparent;border:1px solid var(--line);border-radius:999px;padding:3px 12px;cursor:pointer;font-weight:700;font-size:13px;color:var(--ink-dim)}
+.tab.on{background:var(--ink);color:var(--ink-dark);border-color:transparent}
+.lib-tabs .hint{margin-left:auto;color:var(--ink-dim);font-size:12px}
+.lib-body{flex:1;min-height:0;overflow:auto;display:flex;flex-wrap:wrap;gap:14px 22px;align-content:flex-start;padding-top:6px}
+.grp{display:flex;flex-direction:column;gap:6px;min-width:0}
+.grp h4{margin:0;font-size:12px;font-weight:800;color:var(--ink-dim);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.grp h4 .dot{width:9px;height:9px;border-radius:3px}
+.grp .items{display:flex;flex-wrap:wrap;gap:12px 8px;padding-top:6px}
+
+/* 讲解提示 */
+#hints{width:340px;flex:none;background:var(--bench-2);border-left:1px solid var(--line);overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+#hints h3{margin:0;font-size:14px;font-weight:900;color:var(--ink-dim);letter-spacing:.06em}
+#hints .now{font-size:18px;font-weight:800;line-height:1.45}
+#hints ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:15px;line-height:1.45;color:#e2e6eb}
+#hints .keys{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px;color:var(--ink-dim)}
+#hints .keys kbd{font-family:var(--f-mono);color:var(--ink);background:var(--bench-3);border-radius:4px;padding:1px 6px;text-align:center}
+
+/* 演化横幅 */
+#evo{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;width:min(92%,980px);background:var(--bench);border:2px solid var(--gold);
+  border-radius:14px;padding:10px 16px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:4px}
+#evo .route{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-weight:800;font-size:14px;color:var(--ink-dim)}
+#evo .route b{padding:2px 8px;border-radius:6px;background:var(--bench-3)}
+#evo .route b.cur{background:var(--gold);color:var(--ink-dark)}
+#evo .route b.done{color:var(--ink)}
+#evo .msg{font-size:18px;font-weight:800;line-height:1.4}
+#evo .chg{font-size:14px;color:#e8d9a8;font-weight:700;line-height:1.5}
+
+/* 弹窗 */
+#pop{position:fixed;z-index:500;background:var(--bench-2);border:1px solid var(--line);border-radius:12px;padding:10px;box-shadow:0 14px 34px rgba(0,0,0,.55);
+  display:flex;flex-direction:column;gap:12px;max-height:70vh;overflow:auto;padding-top:16px}
+#pop h4{margin:-4px 0 0;font-size:13px;color:var(--ink-dim)}
+#pop .opt{display:flex;align-items:center;gap:10px}
+#pop .opt .brick{cursor:pointer}
+#pop .opt.cur .brick{outline:3px solid var(--gold)}
+#pop .rm{background:transparent;border:1px dashed var(--line);border-radius:8px;padding:6px;color:var(--ink-dim);cursor:pointer;font-weight:700}
+#cardBg{position:fixed;inset:0;z-index:800;background:rgba(10,12,16,.6);display:flex;align-items:center;justify-content:center;padding:20px}
+.card{width:min(760px,100%);max-height:92vh;overflow:auto;background:#f4f6f8;color:var(--ink-dark);border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.6);animation:pop .3s}
+.card-top{display:flex;gap:16px;align-items:center;padding:20px 22px 16px;background:var(--c);color:#fff;border-radius:16px 16px 0 0;position:relative;
+  box-shadow:inset 0 -6px 0 rgba(0,0,0,.2)}
+.card-top.darktxt{color:var(--ink-dark)}
+.card-top .studs{display:flex;gap:8px;position:absolute;top:-9px;left:30px}
+.card-top .studs i{width:30px;height:11px;border-radius:5px 5px 1px 1px;background:linear-gradient(color-mix(in srgb,var(--c),#fff 38%),var(--c))}
+.card-top h2{margin:0;font-size:28px;font-weight:900;line-height:1.15}
+.card-top .meta{font-size:15px;font-weight:700;opacity:.9;margin-top:4px}
+.card-top .x{margin-left:auto;align-self:flex-start;background:rgba(0,0,0,.25);border:none;border-radius:8px;padding:4px 10px;cursor:pointer;font-weight:900;color:inherit}
+.card dl{margin:0;padding:16px 22px 22px;display:grid;grid-template-columns:7.5em 1fr;gap:12px 14px;font-size:17px;line-height:1.5}
+.card dt{font-weight:900;color:#59626f;font-size:14px;padding-top:3px}
+.card dd{margin:0;font-weight:600;min-width:0;overflow-wrap:anywhere}
+.card dd.big{font-size:19px;font-weight:800}
+.card a{color:#1559b3;font-weight:800}
+.tbv{display:inline-block;margin-left:6px;font-size:12px;font-weight:900;color:#9a3412;background:#ffedd5;border-radius:5px;padding:0 6px;vertical-align:2px}
+.card .links{display:flex;flex-direction:column;gap:2px}
+
+@keyframes snap{0%{transform:translateY(-26px) scale(1.06);opacity:.5}60%{transform:translateY(3px) scale(.98);opacity:1}100%{transform:none}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(5px)}}
+@keyframes glow{0%,100%{filter:none}50%{filter:drop-shadow(0 0 14px var(--gold)) brightness(1.15)}}
+@keyframes pop{0%{transform:scale(.85);opacity:0}100%{transform:scale(1);opacity:1}}
+@keyframes tpulse{50%{filter:brightness(1.6) drop-shadow(0 0 8px var(--gold))}}
+@keyframes j1{from{transform:rotate(-14deg)}to{transform:rotate(16deg)}}
+@keyframes j2{from{transform:rotate(18deg)}to{transform:rotate(-22deg)}}
+@keyframes gr{from{transform:scaleY(1)}to{transform:scaleY(.55)}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+@media (max-width:760px){#hints{display:none}h1 small{display:none}#lib{height:180px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="row1">
+    <h1><span class="logo"><i></i><i></i><i></i></span>乐高拼模型 <small>LLM / VLM / VLA</small></h1>
+    <div id="badge"></div>
+    <div class="ctrls">
+      <button class="btn primary" id="bRun" title="运行数据流">运行 <kbd>R</kbd></button>
+      <button class="btn" id="bStep" title="逐步推进">下一步 <kbd>空格</kbd></button>
+      <button class="btn" id="bEvo">演化路线 <kbd>E</kbd></button>
+      <button class="btn" id="bUndo">撤销 <kbd>Ctrl Z</kbd></button>
+      <button class="btn" id="bClear">清空</button>
+      <button class="btn on" id="bHints">讲解提示 <kbd>H</kbd></button>
+      <button class="btn on" id="bSound">咔哒声</button>
+      <button class="btn" id="bFull">全屏 <kbd>F</kbd></button>
+    </div>
+  </div>
+  <div class="presets" id="presets"><span class="lbl">一键拼装</span></div>
+</header>
+<main>
+  <div id="stageWrap">
+    <div id="stage">
+      <svg id="wires" viewBox="0 0 1440 660"></svg>
+      <div class="zone" style="left:28px"><span>输入端</span>INPUT</div>
+      <div class="zone" style="left:720px"><span>主干</span>BACKBONE</div>
+      <div class="zone" style="left:1050px"><span>输出端</span>OUTPUT</div>
+      <div id="slots1"></div>
+      <div id="tokLayer"></div>
+      <div id="blockView"></div>
+    </div>
+    <div id="evo" hidden></div>
+  </div>
+  <aside id="hints"></aside>
+</main>
+<section id="lib"></section>
+<div id="pop" hidden></div>
+<div id="sim" hidden></div>
+<div id="cardBg" hidden></div>
+
+<script>
+"use strict";
+/* ================= 数据 ================= */
+const CFG = JSON.parse(document.getElementById('lego-config').textContent);
+const B = {}; CFG.bricks.forEach(b => B[b.id] = b);
+const SLOT = {}; CFG.slots.forEach(s => SLOT[s.id] = s);
+const PRESET = {}; CFG.presets.forEach(p => PRESET[p.id] = p);
+const L1 = ['tokenizer','vision','connector','proprio','backbone','head'];
+const INNER = ['pos','norm','attn','ffn'];
+const KEYS = [...L1, ...INNER];
+const $ = (q, r = document) => r.querySelector(q);
+const $$ = (q, r = document) => [...r.querySelectorAll(q)];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* 舞台坐标（1440×660 逻辑像素，整体按比例缩放） */
+const LAY = {
+  srcText:  {x:24, y:64,  w:156, h:120},
+  tokenizer:{x:196,y:64,  w:224, h:120},
+  srcImage: {x:24, y:250, w:156, h:120},
+  vision:   {x:196,y:250, w:224, h:120},
+  connector:{x:446,y:250, w:212, h:120},
+  srcState: {x:24, y:436, w:156, h:120},
+  proprio:  {x:196,y:436, w:224, h:120},
+  backbone: {x:690,y:64,  w:300, h:496},
+  head:     {x:1020,y:250,w:224, h:120},
+  out:      {x:1262,y:64, w:162, h:496},
+  recipe:   {x:196,y:582, w:1048,h:66}
+};
+const BB_TOK = {x:LAY.backbone.x+12, y:LAY.backbone.y+372, w:LAY.backbone.w-24, h:LAY.backbone.h-382};
+
+/* ================= 状态 ================= */
+const emptyState = () => ({slots:{tokenizer:null,vision:null,connector:null,proprio:null,backbone:null,head:null},
+                           inner:{pos:null,norm:null,attn:null,ffn:null}, recipe:[]});
+let st = emptyState();
+const hist = [];
+const clone = o => JSON.parse(JSON.stringify(o));
+const val = (s, k) => L1.includes(k) ? s.slots[k] : s.inner[k];
+let blockOpen = false, flow = null, evo = null, card = null, popKey = null, soundOn = true, hintsOn = true, libTab = 'all';
+
+function commit(fn, opts = {}) {
+  if (flow) cancelFlow();
+  const prev = clone(st);
+  fn(st);
+  if (JSON.stringify(prev) === JSON.stringify(st)) return false;
+  hist.push(prev); if (hist.length > 100) hist.shift();
+  render(prev, opts);
+  return true;
+}
+function placeInto(s, id, target) {
+  const b = B[id];
+  if (target === 'recipe') { if (!s.recipe.includes(id)) s.recipe.push(id); return; }
+  if (INNER.includes(b.slot)) { s.inner[b.slot] = id; return; }
+  s.slots[b.slot] = id;
+  if (b.slot === 'backbone' && b.inner) s.inner = {...b.inner};
+}
+function removeFrom(s, key, id) {
+  if (key === 'recipe') s.recipe = s.recipe.filter(x => x !== id);
+  else if (INNER.includes(key)) s.inner[key] = null;
+  else s.slots[key] = null;
+}
+const accepts = (target, b) => target === 'backbone' ? (b.slot === 'backbone' || INNER.includes(b.slot)) : b.slot === target;
+
+/* ================= 积木 HTML ================= */
+function brickHTML(id, cls = '', extra = '') {
+  const b = B[id]; const n = cls.includes('mini') ? 3 : 4;
+  return `<div class="brick ${cls}" data-brick="${id}" data-cat="${b.cat}" ${extra}><span class="studs">${'<i></i>'.repeat(n)}</span>` +
+         `<span class="face"><b>${esc(b.name)}</b>${b.sub ? `<small>${esc(b.sub)}</small>` : ''}</span></div>`;
+}
+const catVar = c => `var(--c-${c})`;
+
+/* ================= 构建舞台 ================= */
+function slotShell(key, r, extraCls = '') {
+  const s = SLOT[key];
+  return `<div class="slot ${extraCls}" data-drop="${key}" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;--c:${catVar(s.cat)}">
+    <div class="slot-label"><span class="dot"></span>${esc(s.name)} <em>${esc(s.en)}</em><button class="swap" data-swap="${key}" title="候选列表">⇄ 换</button></div>
+    <div class="socket" data-fill="${key}"></div></div>`;
+}
+function buildStage() {
+  const h = [];
+  h.push(`<div class="src" id="srcText" style="left:${LAY.srcText.x}px;top:${LAY.srcText.y}px;width:${LAY.srcText.w}px;height:${LAY.srcText.h}px"><h4>文本输入</h4><p id="promptTxt"></p></div>`);
+  h.push(`<div class="src" id="srcImage" style="left:${LAY.srcImage.x}px;top:${LAY.srcImage.y}px;width:${LAY.srcImage.w}px;height:${LAY.srcImage.h}px"><h4>图像输入</h4>${sceneSVG()}</div>`);
+  h.push(`<div class="src" id="srcState" style="left:${LAY.srcState.x}px;top:${LAY.srcState.y}px;width:${LAY.srcState.w}px;height:${LAY.srcState.h}px"><h4>机器人状态</h4><p class="mono">关节角 θ<br>[0.12, −0.80, 1.05,<br>&nbsp;0.31, −0.27, 0.66]<br>夹爪 0.00</p></div>`);
+  ['tokenizer','vision','connector','proprio','head'].forEach(k => h.push(slotShell(k, LAY[k])));
+  const r = LAY.backbone;
+  [2,1].forEach(i => h.push(`<div class="bb-layer" style="left:${r.x + i*9}px;top:${r.y - i*9}px;width:${r.w}px;height:${r.h}px;opacity:${1 - i*.25}"></div>`));
+  h.push(`<div class="slot" data-drop="backbone" id="bbSlot" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;--c:${catVar('backbone')}">
+    <div class="slot-label"><span class="dot" style="background:#3c434d"></span>${esc(SLOT.backbone.name)} <em>Backbone</em><button class="swap" data-swap="backbone">⇄ 换</button></div>
+    <div class="bb-model" id="bbModel"></div>
+    <div class="bb-chips">${INNER.map(k => `<div class="chip-slot" data-drop="${k}" data-chip="${k}"></div>`).join('')}</div>
+    <div class="bb-foot"><span class="layers" id="bbLayers">×N 层</span><button class="expand" id="bExpand" title="展开 Block（B）">展开 Block ▸</button></div>
+    <div class="bb-tokzone"></div></div>`);
+  const rc = LAY.recipe;
+  h.push(`<div class="slot" data-drop="recipe" style="left:${rc.x}px;top:${rc.y}px;width:${rc.w}px;height:${rc.h}px;--c:${catVar('recipe')}">
+    <div class="slot-label" style="width:150px;flex-direction:column;align-items:flex-start;height:auto;gap:0"><span><span class="dot" style="display:inline-block;margin-right:6px"></span>训练配方</span><em>Recipe · 可多块</em></div>
+    <div class="socket" data-fill="recipe" style="left:170px;top:10px;bottom:8px;justify-content:flex-start;gap:10px"></div></div>`);
+  const o = LAY.out;
+  h.push(`<div class="outzone" style="left:${o.x}px;top:${o.y}px;width:${o.w}px;height:${o.h}px">
+    <h4><span class="dot" style="background:var(--c-text)"></span>文字输出</h4><div class="out-text" id="outText"></div>
+    <h4 class="out-act-h"><span class="dot" style="background:var(--c-action)"></span>动作输出</h4>
+    <div class="out-act" id="outAct">${armSVG()}</div></div>`);
+  $('#slots1').innerHTML = h.join('');
+  $('#wires').innerHTML = `<defs><marker id="ah" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L10 5L0 10z" fill="#f4f6f8"/></marker></defs>` +
+    wirePath('w-text', 180,124, 196,124) + wirePath('w-tok', 420,124, 690,170) +
+    wirePath('w-img', 180,310, 196,310) + wirePath('w-vis', 420,310, 446,310) + wirePath('w-conn', 658,310, 690,310) +
+    wirePath('w-state', 180,496, 196,496) + wirePath('w-prop', 420,496, 690,480) +
+    wirePath('w-bb', 990,310, 1020,310) + wirePath('w-head', 1244,310, 1262,310);
+}
+function wirePath(id, x1, y1, x2, y2) {
+  const mx = (x1 + x2) / 2;
+  return `<path id="${id}" d="M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}"/>`;
+}
+function sceneSVG() {
+  return `<svg viewBox="0 0 136 80" id="sceneSvg"><rect width="136" height="80" fill="#cfd8e3"/><rect y="56" width="136" height="24" fill="#a3b1c2"/>
+  <rect x="80" y="40" width="40" height="26" rx="3" fill="#2f6fd0"/><rect x="80" y="40" width="40" height="6" fill="#4b8ae6"/>
+  <rect x="26" y="44" width="20" height="18" rx="2" fill="#d6372c"/><rect x="29" y="40" width="5" height="4" rx="1" fill="#d6372c"/><rect x="38" y="40" width="5" height="4" rx="1" fill="#d6372c"/>
+  <path d="M60 0 V22 M60 22 L52 32 M60 22 L68 32" stroke="#4d5662" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <g id="patchGrid" stroke="#fff" stroke-width="1.2" opacity="0"><path d="M45 0V80M91 0V80M0 27H136M0 54H136"/></g></svg>`;
+}
+function armSVG() {
+  return `<svg class="arm" id="arm" viewBox="0 0 150 175">
+    <rect x="40" y="160" width="70" height="12" rx="3" fill="#6b7480"/><rect x="62" y="150" width="26" height="14" rx="3" fill="#8b939e"/>
+    <g class="j1"><line x1="75" y1="160" x2="75" y2="98" stroke="var(--c-action)" stroke-width="16" stroke-linecap="round"/>
+      <g class="j2"><line x1="75" y1="98" x2="118" y2="72" stroke="#f09a45" stroke-width="13" stroke-linecap="round"/>
+        <circle cx="75" cy="98" r="8" fill="#3d444e"/>
+        <g class="grip"><path d="M118 72 l13 -9 M118 72 l13 9" stroke="#3d444e" stroke-width="5" stroke-linecap="round" fill="none"/></g>
+      </g><circle cx="75" cy="160" r="9" fill="#3d444e"/></g></svg>`;
+}
+
+/* ================= 渲染 ================= */
+function elFor(k) {
+  if (k === 'backbone') return $('#bbModel > .brick');
+  if (INNER.includes(k)) return blockOpen ? $(`#blockView .slot[data-drop="${k}"]:not(.mirror) .brick`) : $(`.chip-slot[data-chip="${k}"] > .brick`);
+  return $(`.socket[data-fill="${k}"] > .brick`);
+}
+function render(prev, opts = {}) {
+  const removed = [];
+  if (prev) {
+    KEYS.forEach(k => { const a = val(prev, k), b = val(st, k);
+      if (a && a !== b) { const el = elFor(k); if (el) removed.push({id:a, rect:el.getBoundingClientRect(), html:el.outerHTML}); } });
+    prev.recipe.filter(x => !st.recipe.includes(x)).forEach(id => { const el = $(`.socket[data-fill="recipe"] [data-brick="${id}"]`);
+      if (el) removed.push({id, rect:el.getBoundingClientRect(), html:el.outerHTML}); });
+  }
+  fillSockets(); renderBlock();
+  const changed = [];
+  if (prev) {
+    KEYS.forEach(k => { if (val(prev, k) !== val(st, k)) changed.push(k); });
+    changed.forEach(k => { if (!val(st, k)) return;
+      const els = k === 'backbone' ? [$('#bbModel > .brick')] : INNER.includes(k)
+        ? [$(`.chip-slot[data-chip="${k}"] > .brick`), ...$$(`#blockView .slot[data-drop="${k}"] .brick`)] : [$(`.socket[data-fill="${k}"] > .brick`)];
+      els.forEach(e => e && e.classList.add('snap')); });
+    st.recipe.filter(x => !prev.recipe.includes(x)).forEach(id => { const e = $(`.socket[data-fill="recipe"] [data-brick="${id}"]`); e && e.classList.add('snap'); });
+    if (changed.length || removed.length || st.recipe.length !== prev.recipe.length) clack();
+    if (opts.highlight) {
+      changed.forEach(k => { const t = slotEl(k); if (t) { t.classList.remove('changed'); void t.offsetWidth; t.classList.add('changed'); } });
+    }
+  }
+  removed.forEach(flyBack);
+  renderSources(); renderLib(); recognize(); renderHints(); markPresetBtn();
+}
+function slotEl(k) {
+  if (INNER.includes(k)) return blockOpen ? $(`#blockView .slot[data-drop="${k}"]:not(.mirror)`) : $(`.chip-slot[data-chip="${k}"]`);
+  return $(`#slots1 .slot[data-drop="${k}"]`);
+}
+function fillSockets() {
+  ['tokenizer','vision','connector','proprio','head'].forEach(k => {
+    const sk = $(`.socket[data-fill="${k}"]`); const v = st.slots[k];
+    sk.classList.toggle('empty', !v);
+    sk.innerHTML = v ? brickHTML(v) : `拖入${SLOT[k].name.replace(/（.*）/,'')}<br>或点击选择`;
+  });
+  const rs = $('.socket[data-fill="recipe"]');
+  rs.innerHTML = st.recipe.length ? st.recipe.map(id => brickHTML(id, 'mini')).join('') : `<span style="color:rgba(255,255,255,.75);font-weight:700;font-size:13px">拖入训练配方铭牌（预训练 / SFT / RLHF / DPO / 机器人数据）</span>`;
+  const m = $('#bbModel'); const bb = st.slots.backbone;
+  m.classList.toggle('empty', !bb);
+  m.innerHTML = bb ? brickHTML(bb) : (INNER.some(k => st.inner[k]) ? '自定义 Transformer<br>（未指定主干型号）' : '拖入主干模型<br>或展开 Block 自己拼');
+  $('#bbLayers').textContent = '×' + (bb ? B[bb].layers : 'N') + ' 层';
+  INNER.forEach(k => {
+    const c = $(`.chip-slot[data-chip="${k}"]`); const v = st.inner[k];
+    c.classList.toggle('empty', !v);
+    c.innerHTML = v ? brickHTML(v, '', '') + `<span class="tag">${esc(SLOT[k].name)}</span>` : `${esc(SLOT[k].name)} ${esc(SLOT[k].en)} · 空`;
+  });
+  const has = k => !!st.slots[k];
+  const inner = INNER.some(k => st.inner[k]) || has('backbone');
+  const on = (id, c) => $('#' + id).classList.toggle('on', !!c);
+  on('w-text', has('tokenizer')); on('w-tok', has('tokenizer') && inner);
+  on('w-img', has('vision')); on('w-vis', has('vision') && has('connector')); on('w-conn', has('connector') && inner);
+  on('w-state', has('proprio')); on('w-prop', has('proprio') && inner);
+  on('w-bb', inner && has('head')); on('w-head', has('head'));
+}
+function scenario() {
+  const h = st.slots.head ? B[st.slots.head] : null;
+  const act = h && h.cat === 'action'; const vis = !!st.slots.vision;
+  let s;
+  if (act) s = {prompt:'把红色方块放进蓝色盒子', pieces:['把','红色','方块','放进','蓝色','盒子'], answer:null};
+  else if (vis) s = {prompt:'图里有什么？', pieces:['图','里','有','什么','？'], answer:['一个','红色','方块','和','蓝色','盒子','。']};
+  else s = {prompt:'乐高积木来自哪个国家？', pieces:['乐高','积木','来自','哪个','国家','？'], answer:['来自','丹麦','。']};
+  const tk = st.slots.tokenizer;
+  if (tk === 'bytebpe') s.pieces = s.pieces.join('').split('').slice(0, 10);
+  if (tk === 'tiktoken') { const p = []; for (let i = 0; i < s.pieces.length; i += 2) p.push(s.pieces.slice(i, i + 2).join('')); s.pieces = p; }
+  return s;
+}
+function renderSources() {
+  $('#promptTxt').textContent = '「' + scenario().prompt + '」';
+  $('#srcText').classList.toggle('dim', !st.slots.tokenizer);
+  $('#srcImage').classList.toggle('dim', !st.slots.vision);
+  $('#srcState').classList.toggle('dim', !st.slots.proprio);
+  const h = st.slots.head ? B[st.slots.head] : null;
+  $('#outText').classList.toggle('dimmed', !(h && h.cat === 'text'));
+  $('#outAct').classList.toggle('dimmed', !(h && h.cat === 'action'));
+}
+
+/* ---------- 第二层 Block ---------- */
+function blockLayout() {
+  const pre = !st.inner.norm || B[st.inner.norm].placement !== 'post';
+  const W = 190, Y = 305;
+  const L = pre
+    ? {normA:400, attn:612, add1:826, normB:892, ffn:1104, add2:1316, res1:[392,851], res2:[880,1341]}
+    : {attn:400, add1:614, normA:680, ffn:892, add2:1106, normB:1172, res1:[392,639], res2:[880,1131]};
+  return {pre, W, Y, L};
+}
+function renderBlock() {
+  const bv = $('#blockView'); const {pre, W, Y, L} = blockLayout();
+  const bb = st.slots.backbone ? B[st.slots.backbone] : null;
+  if (!bv.dataset.built) {
+    bv.dataset.built = 1;
+    bv.innerHTML = `<svg id="bvSvg" viewBox="0 0 1440 660"><defs><marker id="ah2" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L10 5L0 10z" fill="#ffd166"/></marker>
+      <marker id="ah3" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="3.5" markerHeight="3.5" orient="auto"><path d="M0 0L10 5L0 10z" fill="#eef1f4"/></marker></defs>
+      <path class="main" d="M138 360 H1412" marker-end="url(#ah3)"/><path class="res" id="res1"/><path class="res" id="res2"/>
+      <text id="resT1" y="210">残差连接 Residual</text><text id="resT2" y="210">残差连接 Residual</text></svg>
+      <div class="bv-top"><button class="btn" id="bBack">◂ 返回总览 <kbd>Esc</kbd></button><h2>主干展开：一个 <span>Transformer Block</span> 的内部</h2><span class="sub" id="bvSub"></span></div>
+      <div class="bv-el bv-pill" style="left:24px;top:318px;width:116px">输入<br>token 向量<br><span style="font-size:12px;color:#59626f">（来自分词器/连接器）</span></div>
+      ${slotShell('pos', {x:158, y:Y, w:W, h:110}, 'bv-el')}
+      <div class="bv-frame"><b>Block × N 层（每层结构相同，参数不同）</b><em>→ 下一层 / 输出头</em></div>
+      ${slotShell('norm', {x:0, y:Y, w:W, h:110}, 'bv-el bv-normA')}
+      ${slotShell('attn', {x:0, y:Y, w:W, h:110}, 'bv-el bv-attn')}
+      <div class="bv-el bv-add bv-add1">+<small>残差相加</small></div>
+      ${slotShell('norm', {x:0, y:Y, w:W, h:110}, 'bv-el bv-normB mirror')}
+      ${slotShell('ffn', {x:0, y:Y, w:W, h:110}, 'bv-el bv-ffn')}
+      <div class="bv-el bv-add bv-add2">+<small>残差相加</small></div>
+      <div class="bv-notes" id="bvNotes"></div>`;
+  }
+  const put = (sel, x, y) => { const e = $(sel, bv); e.style.left = x + 'px'; e.style.top = y + 'px'; };
+  put('.bv-normA', L.normA, Y); put('.bv-attn', L.attn, Y); put('.bv-add1', L.add1, 335);
+  put('.bv-normB', L.normB, Y); put('.bv-ffn', L.ffn, Y); put('.bv-add2', L.add2, 335);
+  const ry = 266;
+  $('#res1', bv).setAttribute('d', `M${L.res1[0]} 360 V${ry} H${L.res1[1]} V333`);
+  $('#res2', bv).setAttribute('d', `M${L.res2[0]} 360 V${ry} H${L.res2[1]} V333`);
+  $('#res1', bv).setAttribute('marker-end', 'url(#ah2)'); $('#res2', bv).setAttribute('marker-end', 'url(#ah2)');
+  $('#resT1', bv).setAttribute('x', L.res1[0] + 18); $('#resT1', bv).setAttribute('y', ry - 10);
+  $('#resT2', bv).setAttribute('x', L.res2[0] + 18); $('#resT2', bv).setAttribute('y', ry - 10);
+  $$('.socket', bv).forEach(sk => {
+    const k = sk.dataset.fill; const v = st.inner[k];
+    sk.classList.toggle('empty', !v);
+    sk.innerHTML = v ? brickHTML(v) : `拖入${SLOT[k].name}<br>或点击选择`;
+  });
+  $('#bvSub', bv).textContent = (bb ? `${bb.name} · ×${bb.layers} 层` : '自定义主干') + ' · ' + (pre ? 'Pre-Norm 布局：先归一化再进子层' : 'Post-Norm 布局：残差相加后再归一化');
+  $('#bvNotes', bv).innerHTML = INNER.map(k => {
+    const v = st.inner[k]; const b = v ? B[v] : null;
+    return `<div class="note"><h5><span class="dot" style="background:${catVar(SLOT[k].cat)}"></span>${esc(SLOT[k].name)}：${b ? esc(b.name) : '（空）'}</h5>
+      <p>${b ? esc(b.inNote || b.idea) : '从零件库拖一块进来。'}</p>${b ? miniSVG(k, v) : ''}</div>`;
+  }).join('');
+}
+function miniSVG(k, id) {
+  const S = (inner) => `<svg viewBox="0 0 300 64">${inner}</svg>`;
+  const col = c => `var(--c-${c})`;
+  if (k === 'attn') {
+    let g = ''; const qx = i => 22 + i * 36;
+    for (let i = 0; i < 8; i++) g += `<rect x="${qx(i)-9}" y="4" width="18" height="14" rx="3" fill="${col('attn')}"/>`;
+    g += `<text x="2" y="15" font-size="10" fill="#dfe3e8">Q</text><text x="2" y="57" font-size="10" fill="#dfe3e8">KV</text>`;
+    let kv = [];
+    if (id === 'mha') kv = [...Array(8)].map((_, i) => ({x:qx(i), q:[i]}));
+    if (id === 'gqa') kv = [{x:(qx(0)+qx(3))/2, q:[0,1,2,3]}, {x:(qx(4)+qx(7))/2, q:[4,5,6,7]}];
+    if (id === 'mqa') kv = [{x:(qx(0)+qx(7))/2, q:[0,1,2,3,4,5,6,7]}];
+    if (id === 'mla') {
+      for (let i = 0; i < 8; i++) g += `<line x1="${qx(i)}" y1="18" x2="148" y2="44" stroke="#dfe3e8" stroke-width="1.2" opacity=".6"/>`;
+      g += `<rect x="118" y="42" width="60" height="18" rx="4" fill="${col('gold')}" style="fill:var(--gold)"/><text x="126" y="55" font-size="11" fill="#1b1d21">潜向量 c</text>`;
+      return S(g);
+    }
+    kv.forEach(o => { o.q.forEach(i => g += `<line x1="${qx(i)}" y1="18" x2="${o.x}" y2="44" stroke="#dfe3e8" stroke-width="1.2" opacity=".6"/>`);
+      g += `<rect x="${o.x-10}" y="44" width="20" height="16" rx="3" fill="#eef1f4"/>`; });
+    return S(g);
+  }
+  if (k === 'ffn') {
+    if (id === 'moe' || id === 'dsmoe') {
+      let g = `<rect x="4" y="22" width="52" height="22" rx="4" fill="#eef1f4"/><text x="12" y="37" font-size="11" fill="#1b1d21">路由器</text>`;
+      const n = id === 'moe' ? 8 : 16; const lit = id === 'moe' ? [2,5] : [1,6,9,13];
+      const w = id === 'moe' ? 24 : 11; const gap = id === 'moe' ? 6 : 3; const x0 = id === 'moe' ? 66 : 104;
+      if (id === 'dsmoe') g += `<rect x="66" y="14" width="30" height="38" rx="4" fill="var(--gold)"/><text x="69" y="61" font-size="9" fill="#dfe3e8">共享</text>`;
+      for (let i = 0; i < n; i++) { const x = x0 + i * (w + gap); const on = lit.includes(i);
+        g += `<rect x="${x}" y="14" width="${w}" height="38" rx="3" fill="${on ? col('ffn') : '#5a626e'}"/>`;
+        if (on) g += `<line x1="56" y1="33" x2="${x + w/2}" y2="14" stroke="#dfe3e8" stroke-width="1.2" opacity=".7"/>`; }
+      return S(g);
+    }
+    if (id === 'swiglu' || id === 'geglu') {
+      return S(`<rect x="4" y="22" width="34" height="22" rx="4" fill="#eef1f4"/><text x="15" y="37" font-size="11" fill="#1b1d21">x</text>
+        <rect x="70" y="4" width="92" height="20" rx="4" fill="${col('ffn')}"/><text x="78" y="18" font-size="11" fill="#fff">${id === 'swiglu' ? 'Swish' : 'GELU'}(xW₁) 门</text>
+        <rect x="70" y="42" width="92" height="20" rx="4" fill="#8f3a62"/><text x="88" y="56" font-size="11" fill="#fff">xW₃ 内容</text>
+        <circle cx="196" cy="33" r="13" fill="#eef1f4"/><text x="190" y="38" font-size="14" fill="#1b1d21">⊙</text>
+        <rect x="230" y="22" width="60" height="22" rx="4" fill="${col('ffn')}"/><text x="246" y="37" font-size="11" fill="#fff">W₂</text>
+        <path d="M38 33 H54 M54 14 V52 M54 14 H70 M54 52 H70 M162 14 H180 M162 52 H180 M209 33 H230" stroke="#dfe3e8" stroke-width="1.5" fill="none"/>`);
+    }
+    return S(`<rect x="10" y="22" width="22" height="22" rx="3" fill="#eef1f4"/><text x="16" y="37" font-size="11" fill="#1b1d21">d</text>
+      <rect x="100" y="4" width="40" height="56" rx="4" fill="${col('ffn')}"/><text x="108" y="37" font-size="12" fill="#fff">4d</text>
+      <rect x="210" y="22" width="22" height="22" rx="3" fill="#eef1f4"/><text x="216" y="37" font-size="11" fill="#1b1d21">d</text>
+      <path d="M32 33 H100 M140 33 H210" stroke="#dfe3e8" stroke-width="1.5"/><text x="146" y="27" font-size="11" fill="#dfe3e8">${id === 'relu' ? 'ReLU' : 'GELU'}</text>`);
+  }
+  if (k === 'pos') {
+    if (id === 'sin') {
+      let a = '', b = '';
+      for (let x = 0; x <= 290; x += 5) { a += `${x ? 'L' : 'M'}${x + 5} ${32 + 22 * Math.sin(x / 18)}`; b += `${x ? 'L' : 'M'}${x + 5} ${32 + 14 * Math.cos(x / 7)}`; }
+      return S(`<path d="${a}" stroke="${col('pos')}" stroke-width="3" fill="none"/><path d="${b}" stroke="#dfe3e8" stroke-width="2" fill="none" opacity=".7"/>`);
+    }
+    if (id === 'learned') {
+      let g = ''; for (let i = 0; i < 6; i++) { g += `<text x="4" y="${11 + i * 10}" font-size="9" fill="#dfe3e8">p${i}</text>`;
+        for (let j = 0; j < 14; j++) g += `<rect x="${24 + j * 19}" y="${3 + i * 10}" width="17" height="8" fill="${col('pos')}" opacity="${0.25 + ((i * 7 + j * 13) % 10) / 13}"/>`; }
+      return S(g);
+    }
+    if (id === 'rope') {
+      let g = ''; [0,1,2,3,4].forEach(i => { const cx = 30 + i * 60, a = -0.5 * i;
+        g += `<circle cx="${cx}" cy="34" r="22" fill="none" stroke="#5a626e" stroke-width="2"/><line x1="${cx}" y1="34" x2="${cx + 20 * Math.cos(a)}" y2="${34 + 20 * Math.sin(a)}" stroke="${col('pos')}" stroke-width="4" stroke-linecap="round"/><text x="${cx - 8}" y="63" font-size="9" fill="#dfe3e8">pos ${i}</text>`; });
+      return S(g);
+    }
+    if (id === 'alibi') {
+      let g = ''; for (let i = 0; i < 6; i++) for (let j = 0; j <= i; j++) g += `<rect x="${90 + j * 20}" y="${2 + i * 10}" width="18" height="9" fill="${col('pos')}" opacity="${1 - (i - j) * 0.17}"/>`;
+      return S(g + `<text x="4" y="34" font-size="10" fill="#dfe3e8">分数 − m·距离</text>`);
+    }
+  }
+  if (k === 'norm') {
+    const f = id === 'postln' ? 'LN( x + F(x) )' : id === 'rmsnorm' ? 'x + F( x / RMS(x) · g )' : 'x + F( LN(x) )';
+    return S(`<text x="4" y="40" font-size="20" fill="#eef1f4" style="font-family:var(--f-mono)">${f}</text>`);
+  }
+  return '';
+}
+function openBlock() { if (flow) cancelFlow(); closePop(); blockOpen = true;
+  const r = LAY.backbone; const bv = $('#blockView');
+  bv.style.transformOrigin = `${r.x + r.w / 2}px ${r.y + r.h / 2}px`;
+  renderBlock(); bv.classList.add('open'); libTab = 'blk'; renderLib(); renderHints(); }
+function closeBlock() { blockOpen = false; $('#blockView').classList.remove('open'); if (libTab === 'blk') libTab = 'all'; renderLib(); renderHints(); }
+
+/* ---------- 零件库 ---------- */
+const TABS = [
+  {id:'all', name:'全部'}, {id:'in', name:'输入端', slots:['tokenizer','vision','proprio']}, {id:'conn', name:'连接器', slots:['connector']},
+  {id:'bb', name:'主干型号', slots:['backbone']}, {id:'blk', name:'Block 内部', slots:INNER}, {id:'out', name:'输出头', slots:['head']}, {id:'rc', name:'训练配方', slots:['recipe']}];
+function renderLib() {
+  const used = new Set([...Object.values(st.slots), ...Object.values(st.inner), ...st.recipe].filter(Boolean));
+  const tab = TABS.find(t => t.id === libTab) || TABS[0];
+  const slots = tab.slots || CFG.slots.map(s => s.id);
+  const lib = $('#lib');
+  lib.innerHTML = `<div class="lib-tabs"><h3>零件库</h3>${TABS.map(t => `<button class="tab ${t.id === libTab ? 'on' : ''}" data-tab="${t.id}">${t.name}</button>`).join('')}
+    <span class="hint">拖进插槽 · 单击积木看论文卡片 · 黄点 = 正在使用</span></div>
+    <div class="lib-body">${slots.map(k => {
+      const items = CFG.bricks.filter(b => b.slot === k);
+      return `<div class="grp"><h4><span class="dot" style="background:${catVar(SLOT[k].cat)}"></span>${esc(SLOT[k].name)} · ${esc(SLOT[k].en)}</h4>
+        <div class="items">${items.map(b => brickHTML(b.id, 'mini' + (used.has(b.id) ? ' inuse' : ''))).join('')}</div></div>`; }).join('')}</div>`;
+}
+
+/* ---------- 识别 ---------- */
+let simOpen = false;
+const nmB = id => id ? B[id].name : '空';
+const slotShort = k => SLOT[k].name.replace(/（.*）/, '');
+function rankPresets() {
+  return CFG.presets.map(p => {
+    const ign = p.ignore || []; const alt = p.alt || {}; const keys = KEYS.filter(k => !ign.includes(k));
+    let ok = 0; const diff = [];
+    keys.forEach(k => { const want = L1.includes(k) ? p.slots[k] ?? null : p.inner[k] ?? null; const have = val(st, k);
+      if (have === want || (alt[k] && alt[k].includes(have))) ok++; else diff.push({k, have, want}); });
+    return {p, score: ok / keys.length, ok, total: keys.length, diff};
+  }).sort((a, b) => b.score - a.score || a.diff.length - b.diff.length);
+}
+const diffText = d => d.map(x => `${slotShort(x.k)}：${nmB(x.have)} → ${nmB(x.want)}`);
+function recognize() {
+  const el = $('#badge');
+  const any = KEYS.some(k => val(st, k));
+  const caret = `<button class="simbtn ${simOpen ? 'on' : ''}" id="bSim" title="相似度列表（S）">相似度 ${simOpen ? '▴' : '▾'}</button>`;
+  if (!any) { el.innerHTML = `<span class="badge">从零件库拖积木开始，或按 1–9 / 0 一键拼装</span>`; renderSim(null); return null; }
+  const rank = rankPresets(); const best = rank[0];
+  const pct = r => Math.round(r.score * 100) + '%';
+  if (best.score === 1) el.innerHTML = `<span class="badge full">这是 ${esc(best.p.name)}！</span>${caret}`;
+  else if (best.score >= 0.6) {
+    el.innerHTML = `<span class="badge near"><span class="nm">接近 ${esc(best.p.name)} <span class="pct">${pct(best)}</span></span>` +
+      `<span class="diff">差异 ${best.diff.length} 处：${diffText(best.diff).map(esc).join('；')}</span></span>${caret}`;
+  } else el.innerHTML = `<span class="badge">自定义组合 · 最像 ${esc(best.p.name)}（${pct(best)}）</span>${caret}`;
+  renderSim(rank);
+  return best;
+}
+function renderSim(rank) {
+  const el = $('#sim');
+  if (!simOpen || !rank) { el.hidden = true; return; }
+  el.innerHTML = `<div class="sim-h"><b>和各预设的相似度</b><span>按匹配插槽数计算 · 差异写作「当前积木 → 该模型的积木」· 点一行切换过去 · S 或 Esc 收起</span></div>` +
+    rank.map((r, i) => `<button class="sim-row ${r.score === 1 ? 'hit' : ''}" data-p="${r.p.id}">
+      <span class="rk">${i + 1}</span><span class="sn">${esc(r.p.name)}<em data-kind="${r.p.kind}">${r.p.kind}</em></span>
+      <span class="bar"><i style="width:${r.score * 100}%"></i></span><span class="sp">${Math.round(r.score * 100)}%<small>${r.ok}/${r.total}</small></span>
+      <span class="sd">${r.diff.length ? diffText(r.diff).map(esc).join('；') : '完全一致'}</span></button>`).join('');
+  el.hidden = false;
+  const b = $('#badge').getBoundingClientRect();
+  const w = Math.min(760, innerWidth - 24);
+  el.style.width = w + 'px';
+  el.style.left = Math.max(12, Math.min(innerWidth - w - 12, b.left + b.width / 2 - w / 2)) + 'px';
+  el.style.top = (b.bottom + 8) + 'px';
+}
+function toggleSim(force) { simOpen = force ?? !simOpen; recognize(); }
+function currentPreset() { const any = KEYS.some(k => val(st, k)); if (!any) return null; const r = rankPresets()[0]; return r.score === 1 ? r.p : null; }
+function markPresetBtn() { const p = currentPreset(); $$('.pbtn').forEach(b => b.classList.toggle('active', !!p && b.dataset.p === p.id)); }
+
+/* ---------- 讲解提示 ---------- */
+function renderHints() {
+  const h = $('#hints'); if (!hintsOn) return;
+  let now = '', tips = [];
+  const p = currentPreset();
+  if (evo) { const ep = PRESET[CFG.evolution[evo.i]]; now = ep.evoNote; tips = ep.talk; }
+  else if (flow && flow.i >= 0) { const s = flow.steps[flow.i]; now = `第 ${flow.i + 1}/${flow.steps.length} 步 · ${s.title}`; tips = [s.text, s.tip].filter(Boolean); }
+  else if (blockOpen) { now = '你在 Block 内部。四个槽决定了这一代 Transformer 的「手感」。';
+    tips = ['残差连接（黄线）让信息可以绕过子层直接往后传，深层网络才训得动。', '把归一化换成 Post-LN 看看：它的位置会移到残差相加之后。', '下面的小图对比各方案：注意力看 KV 头怎么共享，FFN 看专家怎么选。']; }
+  else if (p) { now = `当前：${p.name}（${p.kind}）`; tips = p.talk; }
+  else { now = '拼装模式'; tips = ['从零件库把积木拖进插槽；不匹配的积木插不进去，插槽会红色抖动。', '点插槽右上角「⇄ 换」弹出候选列表。', '点任何积木弹出论文卡片；把插槽里的积木拖出底板即可拆下。', '按 R 运行数据流，按空格逐步推进。']; }
+  h.innerHTML = `<h3>讲解提示</h3><div class="now">${esc(now)}</div><ul>${tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+    <h3>快捷键</h3><div class="keys"><kbd>空格</kbd><span>下一步（数据流 / 演化路线）</span><kbd>R</kbd><span>运行 / 暂停数据流</span>
+    <kbd>1–9 0</kbd><span>切换预设（0 = π0-FAST）</span><kbd>E</kbd><span>演化路线</span><kbd>B</kbd><span>展开 / 收起 Block</span>
+    <kbd>S</kbd><span>相似度列表</span><kbd>Esc</kbd><span>关闭卡片 / 返回</span><kbd>H</kbd><span>开关讲解提示</span><kbd>F</kbd><span>全屏</span><kbd>Ctrl Z</kbd><span>撤销</span></div>`;
+}
+
+/* ================= 飞回 / 声音 ================= */
+function flyBack(item) {
+  const lib = $(`#lib .brick[data-brick="${item.id}"]`);
+  const tr = lib ? lib.getBoundingClientRect() : $('#lib').getBoundingClientRect();
+  const f = document.createElement('div'); f.innerHTML = item.html; const el = f.firstElementChild;
+  el.classList.remove('snap'); el.classList.add('flyer');
+  Object.assign(el.style, {left:item.rect.left + 'px', top:item.rect.top + 'px', width:item.rect.width + 'px', height:item.rect.height + 'px'});
+  document.body.appendChild(el);
+  const dx = tr.left + tr.width / 2 - (item.rect.left + item.rect.width / 2), dy = tr.top + tr.height / 2 - (item.rect.top + item.rect.height / 2);
+  const a = el.animate([{transform:'translate(0,0) scale(1)', opacity:1}, {transform:`translate(${dx * .4}px,${dy * .4 - 60}px) scale(.85) rotate(-8deg)`, opacity:1, offset:.4},
+    {transform:`translate(${dx}px,${dy}px) scale(.5)`, opacity:.15}], {duration:700, easing:'ease-in-out'});
+  a.onfinish = () => el.remove(); setTimeout(() => el.remove(), 900);
+}
+let actx = null;
+function clack() {
+  if (!soundOn) return;
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); const t = actx.currentTime;
+    [[1900, 0, .03], [900, .035, .05]].forEach(([f, d, len]) => { const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(.06, t + d); g.gain.exponentialRampToValueAtTime(.0001, t + d + len);
+      o.connect(g).connect(actx.destination); o.start(t + d); o.stop(t + d + len + .01); });
+  } catch (e) {}
+}
+
+/* ================= 拖拽 ================= */
+function dropTargetAt(x, y) { const e = document.elementFromPoint(x, y); return e ? e.closest('[data-drop]') : null; }
+function startPointer(e, id, fromKey, srcEl) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const sx = e.clientX, sy = e.clientY; let drag = null;
+  const move = ev => { if (!drag && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) drag = beginDrag(srcEl, id, fromKey, ev); if (drag) drag.move(ev); };
+  const end = ev => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', end); window.removeEventListener('pointercancel', end);
+    if (drag) drag.drop(ev, ev.type === 'pointercancel'); else if (ev.type === 'pointerup') openCard(id); };
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
+}
+function beginDrag(srcEl, id, fromKey, ev) {
+  closePop();
+  const b = B[id]; const r = srcEl.getBoundingClientRect();
+  const g = srcEl.cloneNode(true); g.classList.add('ghost'); g.classList.remove('snap', 'inuse');
+  const w = Math.max(150, Math.min(r.width, 230)), h = Math.max(54, Math.min(r.height, 80));
+  Object.assign(g.style, {width:w + 'px', height:h + 'px'}); document.body.appendChild(g);
+  const ox = w / 2, oy = h / 2;
+  if (fromKey) srcEl.style.opacity = '.3';
+  $$('[data-drop]').forEach(t => { if (accepts(t.dataset.drop, b)) t.classList.add('can-drop'); });
+  let last = null;
+  const pos = ev => { g.style.left = ev.clientX - ox + 'px'; g.style.top = ev.clientY - oy + 'px'; };
+  pos(ev);
+  return {
+    move(ev) { pos(ev); const t = dropTargetAt(ev.clientX, ev.clientY);
+      if (t !== last) { if (last) last.classList.remove('hover-ok', 'hover-bad'); last = t; }
+      if (t) t.classList.add(accepts(t.dataset.drop, b) ? 'hover-ok' : 'hover-bad'); },
+    drop(ev, cancelled) {
+      g.remove(); srcEl.style.opacity = '';
+      $$('.can-drop,.hover-ok,.hover-bad').forEach(t => t.classList.remove('can-drop', 'hover-ok', 'hover-bad'));
+      if (cancelled) return;
+      const t = dropTargetAt(ev.clientX, ev.clientY);
+      if (t) {
+        const tk = t.dataset.drop;
+        if (!accepts(tk, b)) { shake(t); return; }
+        const realTarget = INNER.includes(b.slot) ? b.slot : tk;
+        if (fromKey && fromKey === realTarget) return;
+        commit(s => { if (fromKey && fromKey !== 'recipe') removeFrom(s, fromKey, id); placeInto(s, id, realTarget); });
+      } else if (fromKey) {
+        commit(s => removeFrom(s, fromKey, id));
+      }
+    }
+  };
+}
+function shake(t) { t.classList.remove('bad'); void t.offsetWidth; t.classList.add('bad'); setTimeout(() => t.classList.remove('bad'), 500); }
+
+/* ================= 候选弹窗 ================= */
+function openPop(key, anchor) {
+  if (flow) cancelFlow();
+  const pop = $('#pop'); popKey = key;
+  const items = CFG.bricks.filter(b => b.slot === key);
+  const cur = key === 'recipe' ? st.recipe : [val(st, key)];
+  pop.innerHTML = `<h4>${esc(SLOT[key].name)} · 点击替换${key === 'recipe' ? '（再点一次取下）' : ''}</h4>` +
+    items.map(b => `<div class="opt ${cur.includes(b.id) ? 'cur' : ''}">${brickHTML(b.id, 'mini', `data-pick="${b.id}"`)}</div>`).join('') +
+    (key !== 'recipe' && val(st, key) ? `<button class="rm" data-rm="${key}">取下当前积木</button>` : '');
+  pop.hidden = false;
+  const r = anchor.getBoundingClientRect(); const pr = pop.getBoundingClientRect();
+  let x = r.left, y = r.bottom + 8;
+  if (x + pr.width > innerWidth - 10) x = innerWidth - pr.width - 10;
+  if (y + pr.height > innerHeight - 10) y = Math.max(10, r.top - pr.height - 8);
+  pop.style.left = Math.max(10, x) + 'px'; pop.style.top = y + 'px';
+}
+function closePop() { $('#pop').hidden = true; popKey = null; }
+
+/* ================= 论文卡片 ================= */
+function openCard(id) {
+  const b = B[id]; card = id; closePop();
+  const v = b.verify || []; const tv = f => v.includes(f) ? '<span class="tbv">待核实</span>' : '';
+  const slotName = SLOT[b.slot].name;
+  const links = (b.links || []).length ? `<div class="links">${b.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div>${tv('links')}`
+    : `<span style="color:#59626f">无 arXiv 链接</span>${tv('links')}`;
+  const dark = b.cat === 'connector' || b.cat === 'recipe';
+  const cb = $('#cardBg');
+  cb.innerHTML = `<div class="card" role="dialog" aria-modal="true" style="--c:${catVar(b.cat)}">
+    <div class="card-top ${dark ? 'darktxt' : ''}"><span class="studs"><i></i><i></i><i></i><i></i></span>
+      <div><h2>${esc(b.name)}</h2><div class="meta">${esc(b.sub || '')} · 插槽：${esc(slotName)}</div></div><button class="x" id="cardX">关闭 Esc</button></div>
+    <dl><dt>论文 / 项目</dt><dd>${esc(b.paper)}${tv('paper')}</dd>
+      <dt>年份</dt><dd>${esc(b.year)}${tv('year')}</dd><dt>机构</dt><dd>${esc(b.org)}${tv('org')}</dd>
+      <dt>核心思想</dt><dd class="big">${esc(b.idea)}</dd><dt>替换了什么 / 解决了什么</dt><dd>${esc(b.solves)}</dd>
+      <dt>生活化比喻</dt><dd>${esc(b.metaphor)}</dd>
+      ${b.layers ? `<dt>层数</dt><dd>${esc(b.layers)}${tv('layers')}</dd>` : ''}
+      ${b.inner ? `<dt>Block 内部</dt><dd>${INNER.map(k => `${SLOT[k].name} ${B[b.inner[k]].name}`).join(' · ')}${tv('inner')}</dd>` : ''}
+      ${b.note ? `<dt>备注</dt><dd>${esc(b.note)}</dd>` : ''}
+      <dt>链接</dt><dd>${links}</dd></dl></div>`;
+  cb.hidden = false;
+}
+function closeCard() { $('#cardBg').hidden = true; card = null; }
+
+/* ================= 数据流动画 ================= */
+const tokLayer = () => $('#tokLayer');
+function tok(label, cls, color) { const e = document.createElement('div'); e.className = 'tok notr ' + cls; e.textContent = label; if (color) e.style.background = color; tokLayer().appendChild(e); return e; }
+function setXY(e, x, y) { e._x = x; e._y = y; e.style.transform = `translate(${x}px,${y}px)`; }
+function arrange(list, r, opt = {}) {
+  const items = list.filter(e => !e.classList.contains('fade'));
+  if (!items.length) return;
+  const cw = opt.cw || 0, gap = opt.gap ?? 6;
+  const widths = items.map(e => cw || e.offsetWidth || 34); const hh = opt.ch || 32;
+  const rows = []; let row = [], rw = 0;
+  items.forEach((e, i) => { const w = widths[i]; if (row.length && rw + w > r.w - 12) { rows.push({row, rw}); row = []; rw = 0; } row.push({e, w}); rw += w + gap; });
+  if (row.length) rows.push({row, rw});
+  const totalH = rows.length * hh + (rows.length - 1) * gap; let y = r.y + (r.h - totalH) / 2;
+  rows.forEach(({row, rw}) => { let x = r.x + (r.w - (rw - gap)) / 2; row.forEach(({e, w}) => { setXY(e, x, y + (hh - 28) / 2); x += w + gap; }); y += hh + gap; });
+}
+function settle(list, from, to, opt) { arrange(list, from, opt); requestAnimationFrame(() => requestAnimationFrame(() => { list.forEach(e => e.classList.remove('notr')); arrange(list, to, opt); })); }
+const later = (fn, ms) => { const t = setTimeout(fn, ms); flow && flow.timers.push(t); return t; };
+const inner = r => ({x:r.x + 10, y:r.y + 34, w:r.w - 20, h:r.h - 42});
+
+function buildFlow() {
+  const S = st.slots, I = st.inner, steps = [], T = {text:[], vis:[], state:[]};
+  const head = S.head ? B[S.head] : null; const act = head && head.cat === 'action'; const sc = scenario();
+  const hasBB = !!S.backbone || INNER.some(k => I[k]);
+  steps.push({focus:['srcText', S.vision && 'srcImage', S.proprio && 'srcState'].filter(Boolean), title:'输入',
+    text:`文字指令「${sc.prompt}」${S.vision ? ' + 一张相机图像' : ''}${S.proprio ? ' + 机器人当前关节状态' : ''}。数据从左往右流过每块积木。`});
+  if (S.tokenizer) steps.push({focus:['tokenizer'], title:'分词 ' + B[S.tokenizer].name, text:B[S.tokenizer].flow + `（这句话切成 ${sc.pieces.length} 个 token）`,
+    run() { T.text = sc.pieces.map(p => tok(p, 't-text')); settle(T.text, inner(LAY.srcText), inner(LAY.tokenizer)); }});
+  else steps.push({focus:['tokenizer'], warn:true, title:'分词器是空的', text:'没有分词器，文字变不成 token，进不了模型。'});
+  if (S.vision) {
+    steps.push({focus:['vision'], title:'视觉编码 ' + B[S.vision].name, text:B[S.vision].flow + '（图中用 9 个 patch 示意）',
+      run() { $('#patchGrid').style.opacity = 1; const cols = ['#cfd8e3','#d6372c','#cfd8e3','#a3b1c2','#4d5662','#2f6fd0','#a3b1c2','#d6372c','#2f6fd0'];
+        T.vis = cols.map(c => tok('', 't-patch', c)); settle(T.vis, inner(LAY.srcImage), inner(LAY.vision), {gap:4}); }});
+    if (S.connector) { const c = B[S.connector];
+      steps.push({focus:['connector'], title:'模态连接 ' + c.name, text:c.flow + (c.reduce ? '（9 个 patch → 4 个查询 token）' : '（数量不变，维度对齐到词向量）'),
+        run() { if (c.reduce) { T.vis.slice(4).forEach(e => e.classList.add('fade')); T.vis = T.vis.slice(0, 4); }
+          T.vis.forEach((e, i) => { e.classList.remove('t-patch'); e.classList.add('t-vis'); e.style.background = ''; e.textContent = c.reduce ? 'Q' + (i + 1) : 'v' + (i + 1); });
+          arrange(T.vis, inner(LAY.connector)); }});
+    } else steps.push({focus:['connector'], warn:true, title:'缺少模态连接器', text:'视觉特征和 LLM 词向量维度对不上，图像信息进不了主干。插一个连接器试试。',
+      run() { T.vis.forEach(e => e.classList.add('fade')); T.vis = []; }});
+  } else if (S.connector) steps.push({focus:['connector'], warn:true, title:'连接器闲置', text:'有连接器但没有视觉编码器，转接头那一头什么也没接。'});
+  if (S.proprio) steps.push({focus:['proprio'], title:'本体感知', text:B[S.proprio].flow,
+    run() { T.state = ['θ1-3','θ4-6','夹爪'].map(l => tok(l, 't-state')); settle(T.state, inner(LAY.srcState), inner(LAY.proprio)); }});
+  const all = () => [...T.vis, ...T.text, ...T.state];
+  if (hasBB) {
+    const bb = S.backbone ? B[S.backbone] : null;
+    steps.push({focus:['backbone'], title:'进入主干' + (bb ? ' ' + bb.name : ''), text:`${T.vis.length || S.vision ? '视觉 token 和文字 token' : '所有 token'}${S.proprio ? '、状态 token' : ''}拼成一条序列，送进 Transformer 主干。`,
+      run() { all().forEach(e => e.style.fontSize = '11px'); arrange(all(), BB_TOK, {gap:4, ch:26}); }});
+    INNER.forEach(k => { const v = I[k];
+      if (v) steps.push({focus:['chip:' + k], title:SLOT[k].name + ' ' + B[v].name, text:B[v].flow, tip:B[v].metaphor,
+        run() { all().forEach(e => { e.classList.remove('pulse'); void e.offsetWidth; e.classList.add('pulse'); });
+          if (k === 'ffn' && (v === 'moe' || v === 'dsmoe')) all().forEach((e, i) => setXY(e, e._x, e._y + (i % 2 ? -6 : 6))); }});
+      else steps.push({focus:['chip:' + k], warn:true, title:SLOT[k].name + '是空的', text:`Block 里缺${SLOT[k].name}，这一层拼不完整。点「展开 Block」补上。`}); });
+    steps.push({focus:['backbone'], title:`重复 ×${bb ? bb.layers : 'N'} 层`, text:'上面这一套（注意力交流 + FFN 加工 + 残差相加）一层层叠起来重复，每层参数不同。最后一个位置的向量汇总了整句话和整张图的信息。',
+      run() { arrange(all(), BB_TOK, {gap:4, ch:26}); }});
+  } else steps.push({focus:['backbone'], warn:true, title:'主干是空的', text:'没有 Transformer 主干，token 无处可去。拖一个主干型号进来，或展开 Block 自己拼。'});
+  if (head) {
+    steps.push({focus:['head'], title:'输出头 ' + head.name, text:head.flow,
+      run() { const a = all(); const last = a[a.length - 1]; a.forEach(e => { if (e !== last) e.classList.add('fade'); });
+        if (last) { last.textContent = 'h'; last.style.background = 'var(--c-backbone)'; arrange([last], inner(LAY.head)); } }});
+    const outR = {x:LAY.out.x + 12, y:LAY.out.y + 36, w:LAY.out.w - 24, h:148};
+    const actR = {x:LAY.out.x + 12, y:LAY.out.y + 226, w:LAY.out.w - 24, h:90};
+    if (!act) steps.push({focus:['out'], title:'输出文字', text:`模型一个词一个词地生成：「${(sc.answer || []).join('')}」。每生成一个词，就把它接回输入再算下一个。`,
+      run() { const ws = sc.answer.map(w => tok(w, 't-out fade')); arrange(ws, outR);
+        ws.forEach((w, i) => later(() => { w.classList.remove('notr', 'fade'); clack(); }, 250 + i * 380)); }});
+    else {
+      const id = head.id;
+      steps.push({focus:['out'], title:'输出动作', text:id === 'discrete_action' ? '7 个动作 token（每个是 0–255 的区间编号）反离散化成末端位移、旋转和夹爪指令，机械臂动起来。'
+          : id === 'fast' ? '生成少量 FAST token，逆 DCT 还原成一整段平滑轨迹，机械臂动起来。'
+          : id === 'flow_expert' ? '灰色噪声沿速度场一步步变成橙色动作块：一次输出未来 50 步动作，机械臂按动作块执行。'
+          : '灰色噪声经过多步去噪变成动作序列，机械臂按序列执行。',
+        run() {
+          let ts;
+          if (id === 'discrete_action') ts = ['128','64','201','127','127','90','255'].map(x => tok(x, 't-act fade'));
+          else if (id === 'fast') ts = ['F12','F307','F5','F88'].map(x => tok(x, 't-act fade'));
+          else ts = ['a₁','a₂','a₃','…','a₅₀'].map(x => tok(x, 't-noise fade'));
+          arrange(ts, actR, {gap:4});
+          ts.forEach((t, i) => later(() => { t.classList.remove('notr', 'fade'); }, 150 + i * 200));
+          if (id === 'flow_expert' || id === 'diffusion') later(() => ts.forEach(t => { t.classList.remove('t-noise'); t.classList.add('t-act'); }), 1300);
+          later(() => $('#arm').classList.add('moving'), 900);
+        }});
+    }
+    steps.push({focus:[], title:'完成', text:`数据走完一遍：${[S.tokenizer && '分词', S.vision && '看图', S.connector && '对齐', hasBB && '主干推理', act ? '输出动作' : '输出文字'].filter(Boolean).join(' → ')}。按 R 重新运行。`});
+  } else steps.push({focus:['head'], warn:true, title:'缺少输出头', text:'主干算完了，但没有输出头把向量变成文字或动作。'});
+  return steps;
+}
+function showFocus(list) {
+  $$('.flow-focus').forEach(e => e.classList.remove('flow-focus'));
+  list.forEach(f => { let e = null;
+    if (f.startsWith('chip:')) e = $(`.chip-slot[data-chip="${f.slice(5)}"]`);
+    else if (f.startsWith('src')) e = $('#' + f);
+    else if (f === 'out') e = $('.outzone');
+    else e = $(`#slots1 .slot[data-drop="${f}"]`);
+    if (e) e.classList.add('flow-focus'); });
+  $$('.src,.outzone').forEach(e => e.style.boxShadow = e.classList.contains('flow-focus') ? '0 0 0 4px var(--gold),0 0 22px rgba(255,209,102,.8)' : '');
+}
+function startFlow(auto) {
+  stopEvo(); closePop(); if (card) closeCard(); if (blockOpen) closeBlock();
+  cancelFlow(); flow = {steps:buildFlow(), i:-1, auto, timers:[], timer:null};
+  $('#stage').classList.add('flowing'); nextFlow();
+}
+function nextFlow() {
+  if (!flow) return startFlow(false);
+  clearTimeout(flow.timer);
+  flow.i++;
+  if (flow.i >= flow.steps.length) { cancelFlow(); return; }
+  const s = flow.steps[flow.i];
+  showFocus(s.focus || []);
+  let cap = $('#stage .cap'); if (!cap) { cap = document.createElement('div'); cap.className = 'cap'; $('#stage').appendChild(cap); }
+  cap.classList.toggle('warn', !!s.warn);
+  cap.innerHTML = `<span class="n">${flow.i + 1}/${flow.steps.length}</span><span class="t">${esc(s.title)}</span><span>${esc(s.text)}</span>`;
+  try { s.run && s.run(); } catch (e) { console.error(e); }
+  renderHints(); updateRunBtn();
+  if (flow.auto && flow.i < flow.steps.length - 1) flow.timer = setTimeout(nextFlow, s.dwell || 2800);
+  else if (flow.i === flow.steps.length - 1) { flow.auto = false; updateRunBtn(); }
+}
+function cancelFlow() {
+  if (flow) { clearTimeout(flow.timer); flow.timers.forEach(clearTimeout); }
+  flow = null; tokLayer().innerHTML = ''; const c = $('#stage .cap'); c && c.remove();
+  showFocus([]); $('#stage').classList.remove('flowing'); const pg = $('#patchGrid'); if (pg) pg.style.opacity = 0;
+  $('#arm').classList.remove('moving'); updateRunBtn(); renderHints();
+}
+function toggleRun() {
+  if (evo) stopEvo();
+  if (!flow || flow.i >= flow.steps.length - 1) return startFlow(true);
+  flow.auto = !flow.auto;
+  if (flow.auto) nextFlow(); else { clearTimeout(flow.timer); updateRunBtn(); }
+}
+function updateRunBtn() { const b = $('#bRun'); const running = flow && flow.auto;
+  b.innerHTML = (running ? '暂停' : '运行') + ' <kbd>R</kbd>'; b.classList.toggle('on', !!running); b.classList.toggle('primary', !running); }
+
+/* ================= 预设 & 演化 ================= */
+function presetState(p) { const s = emptyState(); Object.assign(s.slots, p.slots); Object.assign(s.inner, p.inner); s.recipe = [...(p.recipe || [])]; return s; }
+function loadPreset(id, opts = {highlight:true}) { const p = PRESET[id]; const ns = presetState(p); commit(s => { s.slots = ns.slots; s.inner = ns.inner; s.recipe = ns.recipe; }, opts); }
+function diffList(a, b) {
+  const nm = id => id ? B[id].name : '（空）'; const out = [];
+  KEYS.forEach(k => { if (val(a, k) !== val(b, k)) out.push(`${SLOT[k].name.replace(/（.*）/,'')}：${nm(val(a, k))} → ${nm(val(b, k))}`); });
+  return out;
+}
+function startEvo() {
+  if (flow) cancelFlow(); closePop(); if (blockOpen) closeBlock();
+  evo = {i:0, timer:null}; loadPreset(CFG.evolution[0]); showEvo([]); $('#bEvo').classList.add('on'); scheduleEvo();
+}
+function scheduleEvo() { clearTimeout(evo.timer); if (evo.i < CFG.evolution.length - 1) evo.timer = setTimeout(nextEvo, 7000); }
+function nextEvo() {
+  if (!evo) return;
+  if (evo.i >= CFG.evolution.length - 1) { stopEvo(); return; }
+  const prev = clone(st); evo.i++;
+  loadPreset(CFG.evolution[evo.i]);
+  showEvo(diffList(prev, st)); scheduleEvo();
+}
+function showEvo(chg) {
+  const e = $('#evo'); const seq = CFG.evolution;
+  const ep = PRESET[seq[evo.i]];
+  e.innerHTML = `<div class="route">演化路线 ${seq.map((id, i) => `<b class="${i === evo.i ? 'cur' : i < evo.i ? 'done' : ''}">${esc(PRESET[id].name)}</b>`).join('<span>→</span>')}
+    <span style="margin-left:auto">空格 下一步 · Esc 退出</span></div>
+    <div class="msg">${esc(ep.evoNote)}</div>${chg.length ? `<div class="chg">这次换了什么：${chg.map(esc).join('；')}</div>` : ''}${evo.i === seq.length - 1 ? '<div class="chg">演化到终点。再按空格退出。</div>' : ''}`;
+  e.hidden = false; renderHints();
+}
+function stopEvo() { if (!evo) return; clearTimeout(evo.timer); evo = null; $('#evo').hidden = true; $('#bEvo').classList.remove('on'); renderHints(); }
+
+/* ================= 缩放 ================= */
+function fit() {
+  const w = $('#stageWrap'); const W = w.clientWidth, H = w.clientHeight; const pad = 14;
+  const s = Math.max(.2, Math.min((W - pad * 2) / 1440, (H - pad * 2) / 660));
+  const x = (W - 1440 * s) / 2, y = Math.max(pad, (H - 660 * s) / 2);
+  $('#stage').style.transform = `translate(${x}px,${y}px) scale(${s})`;
+}
+
+/* ================= 事件 ================= */
+function bind() {
+  document.addEventListener('pointerdown', e => {
+    const br = e.target.closest('.brick'); if (!br || br.classList.contains('ghost') || br.closest('#pop') || br.closest('#cardBg')) return;
+    const id = br.dataset.brick;
+    let fromKey = null;
+    const sk = br.closest('[data-fill]'); const chip = br.closest('[data-chip]');
+    if (br.closest('#bbModel')) fromKey = 'backbone';
+    else if (chip) fromKey = chip.dataset.chip;
+    else if (sk) fromKey = sk.dataset.fill;
+    else if (!br.closest('#lib')) return;
+    startPointer(e, id, fromKey, br);
+  });
+  document.addEventListener('click', e => {
+    const t = e.target;
+    if (t.closest('button')) setTimeout(() => t.closest('button') && t.closest('button').blur(), 0);
+    const sw = t.closest('[data-swap]'); if (sw) { openPop(sw.dataset.swap, sw.closest('.slot')); return; }
+    const pick = t.closest('[data-pick]'); if (pick && popKey) { const id = pick.dataset.pick, key = popKey;
+      commit(s => { if (key === 'recipe' && s.recipe.includes(id)) s.recipe = s.recipe.filter(x => x !== id); else placeInto(s, id, key); }); closePop(); return; }
+    const rm = t.closest('[data-rm]'); if (rm) { const k = rm.dataset.rm; commit(s => removeFrom(s, k, val(s, k))); closePop(); return; }
+    if (t.closest('#bExpand')) { openBlock(); return; }
+    if (t.closest('#bBack')) { closeBlock(); return; }
+    if (t.closest('#cardX') || t.id === 'cardBg') { closeCard(); return; }
+    const tab = t.closest('[data-tab]'); if (tab) { libTab = tab.dataset.tab; renderLib(); return; }
+    if (t.closest('#bSim')) { toggleSim(); return; }
+    const sr = t.closest('.sim-row'); if (sr) { stopEvo(); loadPreset(sr.dataset.p); return; }
+    if (simOpen && !t.closest('#sim')) toggleSim(false);
+    const pb = t.closest('.pbtn'); if (pb) { stopEvo(); loadPreset(pb.dataset.p); return; }
+    const emptySock = t.closest('.socket.empty'); if (emptySock) { openPop(emptySock.dataset.fill, emptySock.closest('.slot')); return; }
+    if (t.closest('.chip-slot.empty') || t.closest('#bbModel.empty')) { t.closest('#bbModel.empty') ? openPop('backbone', $('#bbSlot')) : openBlock(); return; }
+    const rs = t.closest('.socket[data-fill="recipe"]'); if (rs && !t.closest('.brick')) { openPop('recipe', rs.closest('.slot')); return; }
+    if (!t.closest('#pop')) closePop();
+  });
+  $('#bbSlot').addEventListener('dblclick', e => { if (!e.target.closest('.brick')) openBlock(); });
+  $('#bRun').onclick = toggleRun;
+  $('#bStep').onclick = () => evo ? nextEvo() : nextFlow();
+  $('#bEvo').onclick = () => evo ? stopEvo() : startEvo();
+  $('#bUndo').onclick = undo;
+  $('#bClear').onclick = () => { stopEvo(); commit(s => { const e = emptyState(); s.slots = e.slots; s.inner = e.inner; s.recipe = []; }); };
+  $('#bHints').onclick = toggleHints;
+  $('#bSound').onclick = () => { soundOn = !soundOn; $('#bSound').classList.toggle('on', soundOn); };
+  $('#bFull').onclick = toggleFull;
+  document.addEventListener('keydown', e => {
+    if (e.target.matches && e.target.matches('input,textarea,select')) return;
+    const k = e.key;
+    if (k === 'Escape') { if (card) closeCard(); else if (simOpen) toggleSim(false); else if (popKey) closePop(); else if (blockOpen) closeBlock(); else if (evo) stopEvo(); else if (flow) cancelFlow(); return; }
+    if (card) { if (k === ' ') e.preventDefault(); return; }
+    if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'Z')) { e.preventDefault(); undo(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (k === ' ') { e.preventDefault(); if (e.repeat) return; evo ? nextEvo() : nextFlow(); }
+    else if (k === 'r' || k === 'R') toggleRun();
+    else if (/^[0-9]$/.test(k)) { const p = CFG.presets.find(p => p.hotkey === k); if (p) { stopEvo(); closePop(); loadPreset(p.id); } }
+    else if (k === 'e' || k === 'E') evo ? stopEvo() : startEvo();
+    else if (k === 'b' || k === 'B') blockOpen ? closeBlock() : openBlock();
+    else if (k === 'h' || k === 'H') toggleHints();
+    else if (k === 's' || k === 'S') toggleSim();
+    else if (k === 'f' || k === 'F') toggleFull();
+  });
+  document.addEventListener('keyup', e => { if (e.key === ' ') e.preventDefault(); });
+  new ResizeObserver(fit).observe($('#stageWrap'));
+  addEventListener('resize', () => simOpen && recognize());
+}
+function undo() { if (!hist.length) return; stopEvo(); if (flow) cancelFlow(); const prev = clone(st); st = hist.pop(); render(prev); }
+function toggleHints() { hintsOn = !hintsOn; $('#hints').hidden = !hintsOn; $('#bHints').classList.toggle('on', hintsOn); renderHints(); setTimeout(fit, 0); }
+function toggleFull() { try { if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {}); else document.exitFullscreen(); } catch (e) {} }
+
+/* ================= 启动 ================= */
+function init() {
+  $('#presets').insertAdjacentHTML('beforeend', CFG.presets.map(p => `<button class="pbtn" data-p="${p.id}" data-kind="${p.kind}"><span class="k">${p.hotkey}</span>${esc(p.name)}</button>`).join(''));
+  buildStage(); bind();
+  st = presetState(PRESET.gpt2);
+  render(null); fit();
+}
+init();
+</script>
+</body>
+</html>
