@@ -1719,7 +1719,15 @@ init();
  function showRecord(id){
   const r=records().find(x=>x.id===id);if(!r)return;selected=id;
   const label=mode==='dev'?'发展汇总':'问题汇总';
-  reader.innerHTML='<h3>'+escD(r.title)+'</h3><div class="dd-note">来源：'+label+' · 原文页码：'+r.page_start+(r.page_end!==r.page_start?'–'+r.page_end:'')+'</div><div class="dd-content">'+escD(r.content).replace(/\[\[PAGE (\d+)\]\]/g,'<span class="dd-page">第 $1 页</span>')+'</div>';
+  const linked=mode==='questions'&&window.KNOWLEDGE_DATA?(r.related_node_ids||[]).map(id=>window.KNOWLEDGE_DATA.nodes.find(n=>n.id===id)).filter(Boolean):[];
+  const linkHtml=linked.length?'<div class="dd-note">关联基础知识节点（点击可跳转）：</div><div class="dd-tabs">'+linked.map(n=>'<button data-knowledge="'+escD(n.id)+'">'+escD(n.name)+'</button>').join('')+'</div>':'';
+  reader.innerHTML='<h3>'+escD(r.title)+'</h3><div class="dd-note">来源：'+label+' · 原文页码：'+r.page_start+(r.page_end!==r.page_start?'–'+r.page_end:'')+'</div>'+linkHtml+'<div class="dd-content">'+escD(r.content).replace(/\[\[PAGE (\d+)\]\]/g,'<span class="dd-page">第 $1 页</span>')+'</div>';
+  reader.querySelectorAll('[data-knowledge]').forEach(b=>b.addEventListener('click',()=>{
+   const node=window.KNOWLEDGE_DATA.nodes.find(n=>n.id===b.dataset.knowledge);if(!node)return;
+   root.classList.remove('open');const kp=document.getElementById('knowledgeBtn');kp?.click();
+   const input=document.getElementById('kpSearch');if(input){input.value=node.name;input.dispatchEvent(new Event('input'));}
+   const card=document.querySelector('#kpList [data-id="'+node.id+'"]');card?.click();
+  }));
   render();
  }
  function render(){
