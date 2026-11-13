@@ -802,6 +802,34 @@ main{flex:1;min-height:0;display:flex}
 #knowledgePanel .kp-rel button{background:#202d49;border:1px solid #3b4b6b;color:#dbe3ff;border-radius:20px;padding:5px 9px;cursor:pointer;font-size:11px}
 #knowledgePanel .kp-empty{color:#9ba9c5;text-align:center;padding:30px}
 @media(max-width:800px){#knowledgePanel{padding:14px}#knowledgePanel .kp-tools{grid-template-columns:1fr}#knowledgePanel .kp-layout{grid-template-columns:1fr}#knowledgePanel .kp-list{max-height:45vh}}
+
+/* Detailed research notes */
+#deepDiveBtn{border-color:#68cdb8;color:#c9fff2}
+#deepDivePanel{position:fixed;inset:0;z-index:1001;background:#0b1020;color:#eef2ff;display:none;overflow:auto;padding:22px;box-sizing:border-box}
+#deepDivePanel.open{display:block}
+#deepDivePanel .dd-wrap{max-width:1500px;margin:auto}
+#deepDivePanel .dd-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+#deepDivePanel h2{font-size:23px;margin:0}
+#deepDivePanel .dd-sub{color:#aab4ce;font-size:12px;margin-top:5px}
+#deepDivePanel .dd-tabs{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+#deepDivePanel .dd-tabs button{background:#17223a;border:1px solid #34415d;color:#dce5fa;border-radius:9px;padding:9px 13px;cursor:pointer}
+#deepDivePanel .dd-tabs button.active{background:#2b3c62;border-color:#91a2ff;color:white}
+#deepDivePanel .dd-tools{display:grid;grid-template-columns:minmax(220px,1fr) 260px;gap:10px;margin-bottom:12px}
+#deepDivePanel input,#deepDivePanel select{background:#151e33;border:1px solid #34415d;color:#eef2ff;border-radius:9px;padding:11px;min-width:0}
+#deepDivePanel .dd-layout{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(0,1.2fr);gap:14px;align-items:start}
+#deepDivePanel .dd-index,#deepDivePanel .dd-reader{background:#111a2d;border:1px solid #293650;border-radius:13px;padding:13px}
+#deepDivePanel .dd-index{max-height:calc(100vh - 185px);overflow:auto}
+#deepDivePanel .dd-reader{min-height:65vh}
+#deepDivePanel .dd-entry{padding:11px;border:1px solid #293650;border-radius:9px;background:#151f34;margin-bottom:8px;cursor:pointer}
+#deepDivePanel .dd-entry:hover,#deepDivePanel .dd-entry.active{border-color:#91a2ff;background:#1a2742}
+#deepDivePanel .dd-entry strong{display:block;font-size:13px;line-height:1.5}
+#deepDivePanel .dd-entry small{display:block;color:#9ba9c5;font-size:11px;margin-top:4px}
+#deepDivePanel .dd-reader h3{font-size:19px;margin:2px 0 14px}
+#deepDivePanel .dd-content{font-size:13px;line-height:1.85;color:#d5deef;white-space:pre-wrap;overflow-wrap:anywhere}
+#deepDivePanel .dd-content .dd-page{display:inline-block;color:#8ea1d0;font-size:11px;border:1px solid #334363;border-radius:5px;padding:1px 5px;margin-right:6px}
+#deepDivePanel .dd-empty{color:#9ba9c5;padding:30px;text-align:center}
+#deepDivePanel .dd-note{font-size:11px;color:#93a2bf;margin:10px 0}
+@media(max-width:850px){#deepDivePanel{padding:12px}#deepDivePanel .dd-tools{grid-template-columns:1fr}#deepDivePanel .dd-layout{grid-template-columns:1fr}#deepDivePanel .dd-index{max-height:35vh}#deepDivePanel .dd-reader{min-height:40vh}}
 </style>
 </head>
 <body>
@@ -810,6 +838,7 @@ main{flex:1;min-height:0;display:flex}
     <h1><span class="logo"><i></i><i></i><i></i></span>乐高拼模型 <small>LLM / VLM / VLA</small></h1>
     <div id="badge"></div>
     <div class="ctrls">
+      <button class="btn" id="deepDiveBtn" title="阅读详细技术发展与研究问答">深入资料</button>
       <button class="btn" id="knowledgeBtn" title="浏览 LLM / VLM / VLA 技术发展脉络">知识脉络</button>
       <button class="btn primary" id="bRun" title="运行数据流">运行 <kbd>R</kbd></button>
       <button class="btn" id="bStep" title="逐步推进">下一步 <kbd>空格</kbd></button>
@@ -840,6 +869,15 @@ main{flex:1;min-height:0;display:flex}
 </main>
 <section id="lib"></section>
 
+<div id="deepDivePanel" aria-label="深入资料">
+ <div class="dd-wrap">
+  <div class="dd-head"><div><h2>深入资料库</h2><div class="dd-sub" id="ddStats">发展脉络 · 专题问答 · 研究分析</div></div><button class="btn" id="ddClose">返回模型拼装</button></div>
+  <div class="dd-tabs"><button id="ddDevTab" class="active">技术发展汇总</button><button id="ddQTab">专题问题与研究 QA</button></div>
+  <div class="dd-tools"><input id="ddSearch" type="search" placeholder="搜索技术、论文、问题、实验方案或关键词…"><select id="ddFilter"></select></div>
+  <div class="dd-layout"><div class="dd-index" id="ddIndex"></div><article class="dd-reader" id="ddReader"><div class="dd-empty">选择左侧章节或问题，阅读完整整理内容。</div></article></div>
+ </div>
+</div>
+
 <div id="knowledgePanel" aria-label="技术发展脉络">
   <div class="kp-head"><div><h2>技术发展脉络</h2><div class="kp-sub" id="kpStats">LLM → VLM / 上游 → VLA → 下游应用</div></div><button class="btn" id="kpClose">返回模型拼装</button></div>
   <div class="kp-tools"><input id="kpSearch" type="search" placeholder="搜索技术、论文、机构或关键词…"><select id="kpLayer"><option value="">全部层级</option><option value="L1_llm">L1 · LLM</option><option value="L2_upstream">L2 · 上游视觉与数据</option><option value="L3_vla">L3 · VLA</option><option value="L4_downstream">L4 · 下游应用</option></select><select id="kpLine"><option value="">全部主题分类</option></select></div>
@@ -851,6 +889,7 @@ main{flex:1;min-height:0;display:flex}
 <div id="cardBg" hidden></div>
 
 <script src="data/knowledge-data.js"></script>
+<script src="data/knowledge-deepdives.js"></script>
 <script>
 "use strict";
 /* ================= 数据 ================= */
@@ -1659,6 +1698,53 @@ init();
   [search,layer,line].forEach(el=>el.addEventListener('input',render));
   [layer,line].forEach(el=>el.addEventListener('change',render));
   render();
+})();
+
+
+/* ================= 深入资料库 ================= */
+(() => {
+ const root=document.getElementById('deepDivePanel'), data=window.KNOWLEDGE_DEEPDIVES;
+ if(!root||!data)return;
+ const $d=id=>document.getElementById(id);
+ const escD=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+ const index=$d('ddIndex'),reader=$d('ddReader'),search=$d('ddSearch'),filter=$d('ddFilter'),stats=$d('ddStats');
+ let mode='dev',selected=null;
+ const records=()=>mode==='dev'?data.development.sections:data.question_bank.questions;
+ const groups=()=>data.question_bank.groups;
+ function setupFilter(){
+  filter.innerHTML=mode==='dev'?'<option value="">全部发展章节</option>':'<option value="">全部问题</option>'+groups().map(g=>'<option value="'+escD(g.id)+'">'+escD(g.title)+'</option>').join('');
+  filter.hidden=mode==='dev';
+  search.placeholder=mode==='dev'?'搜索发展阶段、论文或技术关键词…':'搜索问题、技术、论文、实验方案或结论…';
+ }
+ function showRecord(id){
+  const r=records().find(x=>x.id===id);if(!r)return;selected=id;
+  const label=mode==='dev'?'发展汇总':'问题汇总';
+  reader.innerHTML='<h3>'+escD(r.title)+'</h3><div class="dd-note">来源：'+label+' · 原文页码：'+r.page_start+(r.page_end!==r.page_start?'–'+r.page_end:'')+'</div><div class="dd-content">'+escD(r.content).replace(/\[\[PAGE (\d+)\]\]/g,'<span class="dd-page">第 $1 页</span>')+'</div>';
+  render();
+ }
+ function render(){
+  const q=search.value.trim().toLowerCase(),f=filter.value;
+  let rows=records().filter(r=>{
+   const parent=mode==='dev'||!f||r.group_id===f;
+   return parent&&(!q||(r.title+' '+r.content).toLowerCase().includes(q));
+  });
+  stats.textContent=mode==='dev'?data.development.sections.length+' 个发展章节 · 来源 '+data.sources[0].filename:data.question_bank.questions.length+' 个专题问题 · '+groups().length+' 个主题组 · 来源 '+data.sources[1].filename;
+  index.innerHTML=rows.length?rows.map(r=>'<div class="dd-entry '+(selected===r.id?'active':'')+'" data-id="'+escD(r.id)+'"><strong>'+escD(r.title)+'</strong><small>原文第 '+r.page_start+(r.page_end!==r.page_start?'–'+r.page_end:'')+' 页</small></div>').join(''):'<div class="dd-empty">没有找到匹配的内容。</div>';
+  index.querySelectorAll('[data-id]').forEach(el=>el.addEventListener('click',()=>showRecord(el.dataset.id)));
+ }
+ function setMode(next){
+  mode=next;selected=null;
+  $d('ddDevTab').classList.toggle('active',mode==='dev');
+  $d('ddQTab').classList.toggle('active',mode==='questions');
+  setupFilter();
+  const first=records()[0]; if(first)showRecord(first.id);else render();
+ }
+ $d('deepDiveBtn').addEventListener('click',()=>{root.classList.add('open');setMode('dev')});
+ $d('ddClose').addEventListener('click',()=>root.classList.remove('open'));
+ $d('ddDevTab').addEventListener('click',()=>setMode('dev'));
+ $d('ddQTab').addEventListener('click',()=>setMode('questions'));
+ search.addEventListener('input',render);filter.addEventListener('change',render);
+ setMode('dev');
 })();
 
 </script>
