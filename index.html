@@ -776,6 +776,32 @@ main{flex:1;min-height:0;display:flex}
 @keyframes gr{from{transform:scaleY(1)}to{transform:scaleY(.55)}}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 @media (max-width:760px){#hints{display:none}h1 small{display:none}#lib{height:180px}}
+
+/* Knowledge timeline */
+#knowledgeBtn{border-color:#7c8cff;color:#dce2ff}
+#knowledgePanel{position:fixed;inset:0;z-index:1000;background:#0b1020;color:#eef2ff;display:none;overflow:auto;padding:24px;box-sizing:border-box}
+#knowledgePanel.open{display:block}
+#knowledgePanel .kp-head{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:1400px;margin:0 auto 18px}
+#knowledgePanel h2{font-size:24px;margin:0}
+#knowledgePanel .kp-sub{color:#aab4ce;font-size:13px;margin-top:5px}
+#knowledgePanel .kp-tools{max-width:1400px;margin:0 auto 16px;display:grid;grid-template-columns:minmax(180px,1fr) 220px 260px;gap:10px}
+#knowledgePanel input,#knowledgePanel select{background:#151e33;border:1px solid #34415d;color:#eef2ff;border-radius:9px;padding:11px;min-width:0}
+#knowledgePanel .kp-layout{max-width:1400px;margin:auto;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:16px;align-items:start}
+#knowledgePanel .kp-list,#knowledgePanel .kp-detail{background:#111a2d;border:1px solid #293650;border-radius:14px;padding:14px}
+#knowledgePanel .kp-list{max-height:calc(100vh - 190px);overflow:auto}
+#knowledgePanel .kp-card{padding:12px;border:1px solid #293650;border-radius:10px;margin-bottom:9px;cursor:pointer;background:#151f34}
+#knowledgePanel .kp-card:hover,#knowledgePanel .kp-card.active{border-color:#91a2ff;background:#1a2742}
+#knowledgePanel .kp-meta{font-size:11px;color:#9ba9c5;margin-bottom:5px}
+#knowledgePanel .kp-card strong{display:block;font-size:14px;margin-bottom:5px}
+#knowledgePanel .kp-card p{font-size:12px;line-height:1.6;color:#c4cde0;margin:0}
+#knowledgePanel .kp-detail h3{margin:4px 0 12px;font-size:20px}
+#knowledgePanel .kp-detail h4{font-size:12px;color:#9eafff;text-transform:uppercase;letter-spacing:.06em;margin:18px 0 6px}
+#knowledgePanel .kp-detail p{font-size:13px;line-height:1.75;color:#d3dbeb;margin:0}
+#knowledgePanel .kp-links a{display:inline-block;color:#aabaff;margin:8px 12px 0 0;font-size:12px}
+#knowledgePanel .kp-rel{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+#knowledgePanel .kp-rel button{background:#202d49;border:1px solid #3b4b6b;color:#dbe3ff;border-radius:20px;padding:5px 9px;cursor:pointer;font-size:11px}
+#knowledgePanel .kp-empty{color:#9ba9c5;text-align:center;padding:30px}
+@media(max-width:800px){#knowledgePanel{padding:14px}#knowledgePanel .kp-tools{grid-template-columns:1fr}#knowledgePanel .kp-layout{grid-template-columns:1fr}#knowledgePanel .kp-list{max-height:45vh}}
 </style>
 </head>
 <body>
@@ -784,6 +810,7 @@ main{flex:1;min-height:0;display:flex}
     <h1><span class="logo"><i></i><i></i><i></i></span>乐高拼模型 <small>LLM / VLM / VLA</small></h1>
     <div id="badge"></div>
     <div class="ctrls">
+      <button class="btn" id="knowledgeBtn" title="浏览 LLM / VLM / VLA 技术发展脉络">知识脉络</button>
       <button class="btn primary" id="bRun" title="运行数据流">运行 <kbd>R</kbd></button>
       <button class="btn" id="bStep" title="逐步推进">下一步 <kbd>空格</kbd></button>
       <button class="btn" id="bEvo">演化路线 <kbd>E</kbd></button>
@@ -812,10 +839,18 @@ main{flex:1;min-height:0;display:flex}
   <aside id="hints"></aside>
 </main>
 <section id="lib"></section>
+
+<div id="knowledgePanel" aria-label="技术发展脉络">
+  <div class="kp-head"><div><h2>技术发展脉络</h2><div class="kp-sub" id="kpStats">LLM → VLM / 上游 → VLA → 下游应用</div></div><button class="btn" id="kpClose">返回模型拼装</button></div>
+  <div class="kp-tools"><input id="kpSearch" type="search" placeholder="搜索技术、论文、机构或关键词…"><select id="kpLayer"><option value="">全部层级</option><option value="L1_llm">L1 · LLM</option><option value="L2_upstream">L2 · 上游视觉与数据</option><option value="L3_vla">L3 · VLA</option><option value="L4_downstream">L4 · 下游应用</option></select><select id="kpLine"><option value="">全部主题分类</option></select></div>
+  <div class="kp-layout"><div class="kp-list" id="kpList" aria-live="polite"></div><article class="kp-detail" id="kpDetail"><div class="kp-empty">选择左侧知识节点，查看问题背景、核心方法与技术关联。</div></article></div>
+</div>
+
 <div id="pop" hidden></div>
 <div id="sim" hidden></div>
 <div id="cardBg" hidden></div>
 
+<script src="data/knowledge-data.js"></script>
 <script>
 "use strict";
 /* ================= 数据 ================= */
@@ -1589,6 +1624,43 @@ function init() {
   render(null); fit();
 }
 init();
+
+/* ================= 技术发展脉络 ================= */
+(() => {
+  const root = document.getElementById('knowledgePanel');
+  const data = window.KNOWLEDGE_DATA;
+  if (!root || !data) return;
+  const byId = new Map(data.nodes.map(n => [n.id,n]));
+  const layerNames = {L1_llm:'L1 · LLM',L2_upstream:'L2 · 上游视觉与数据',L3_vla:'L3 · VLA',L4_downstream:'L4 · 下游应用'};
+  const $k = id => document.getElementById(id);
+  const escK = s => String(s ?? '').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const lineMap = new Map(data.lines.map(x=>[x.id,x]));
+  const search=$k('kpSearch'), layer=$k('kpLayer'), line=$k('kpLine'), list=$k('kpList'), detail=$k('kpDetail');
+  let selected = null;
+  data.lines.forEach(x=>{const o=document.createElement('option');o.value=x.id;o.textContent=x.name;line.appendChild(o)});
+  const open = id => {
+    const n=byId.get(id); if(!n)return; selected=id;
+    const links = n.link ? '<a href="'+escK(n.link)+'" target="_blank" rel="noopener">论文 / 来源 ↗</a>' : '';
+    const rel = (arr,label) => arr?.length ? '<h4>'+label+'</h4><div class="kp-rel">'+arr.map(x=>byId.has(x)?'<button data-node="'+escK(x)+'">'+escK(byId.get(x).name)+'</button>':'').join('')+'</div>' : '';
+    detail.innerHTML='<div class="kp-meta">'+escK(layerNames[n.layer]||n.layer)+' · '+escK(n.date||'时间未标注')+' · '+escK(n.org||'')+'</div><h3>'+escK(n.name)+'</h3><h4>核心概述</h4><p>'+escK(n.summary)+'</p><h4>要解决的问题</h4><p>'+escK(n.problem)+'</p><h4>核心方法</h4><p>'+escK(n.method)+'</p><h4>所属主题</h4><div class="kp-rel">'+(n.lines||[]).map(x=>lineMap.has(x)?'<button data-line="'+escK(x)+'">'+escK(lineMap.get(x).name)+'</button>':'').join('')+'</div>'+rel(n.inherits_from,'技术继承')+rel(n.related,'相关技术')+'<div class="kp-links">'+links+'</div>';
+    detail.querySelectorAll('[data-node]').forEach(b=>b.addEventListener('click',()=>open(b.dataset.node)));
+    detail.querySelectorAll('[data-line]').forEach(b=>{b.addEventListener('click',()=>{line.value=b.dataset.line;render()})});
+    render();
+  };
+  const render=()=>{
+    const q=search.value.trim().toLowerCase(), l=layer.value, c=line.value;
+    const rows=data.nodes.filter(n=>(!l||n.layer===l)&&(!c||(n.lines||[]).includes(c))&&(!q||[n.name,n.summary,n.problem,n.method,n.paper_title,n.org,(n.tags||[]).join(' ')].join(' ').toLowerCase().includes(q))).sort((a,b)=>(a.date||'').localeCompare(b.date||'')||a.name.localeCompare(b.name));
+    $k('kpStats').textContent=data.nodes.length+' 个节点 · '+data.lines.length+' 条主题线 · 当前显示 '+rows.length+' 个';
+    list.innerHTML=rows.length?rows.map(n=>'<div class="kp-card '+(selected===n.id?'active':'')+'" data-id="'+escK(n.id)+'"><div class="kp-meta">'+escK(layerNames[n.layer]||n.layer)+' · '+escK(n.date||'')+' · '+escK(n.org||'')+'</div><strong>'+escK(n.name)+'</strong><p>'+escK(n.summary)+'</p></div>').join(''):'<div class="kp-empty">没有找到匹配的知识节点。</div>';
+    list.querySelectorAll('[data-id]').forEach(el=>el.addEventListener('click',()=>open(el.dataset.id)));
+  };
+  [$k('knowledgeBtn')].forEach(b=>b.addEventListener('click',()=>{root.classList.add('open');root.setAttribute('aria-hidden','false');render()}));
+  $k('kpClose').addEventListener('click',()=>{root.classList.remove('open');root.setAttribute('aria-hidden','true')});
+  [search,layer,line].forEach(el=>el.addEventListener('input',render));
+  [layer,line].forEach(el=>el.addEventListener('change',render));
+  render();
+})();
+
 </script>
 </body>
 </html>
