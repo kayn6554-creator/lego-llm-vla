@@ -803,6 +803,28 @@ main{flex:1;min-height:0;display:flex}
 #knowledgePanel .kp-empty{color:#9ba9c5;text-align:center;padding:30px}
 @media(max-width:800px){#knowledgePanel{padding:14px}#knowledgePanel .kp-tools{grid-template-columns:1fr}#knowledgePanel .kp-layout{grid-template-columns:1fr}#knowledgePanel .kp-list{max-height:45vh}}
 
+
+/* VLA subway map workspace */
+#metroMapBtn{border-color:#65b8a7;color:#c9fff2}
+#metroMapPanel{position:fixed;inset:0;z-index:1002;display:none;flex-direction:column;background:#0b1020;color:#eef2ff}
+#metroMapPanel.open{display:flex}
+#metroMapPanel .mm-head{height:54px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 16px;border-bottom:1px solid #293650;background:#111a2d}
+#metroMapPanel .mm-title{font-size:14px;font-weight:650}
+#metroMapPanel .mm-sub{font-size:11px;color:#9ba9c5;margin-left:10px}
+#metroMapPanel .mm-actions{display:flex;align-items:center;gap:8px}
+#metroMapPanel .mm-actions a{font-size:12px;color:#cbd6ef;text-decoration:none;border:1px solid #3b4b6b;border-radius:8px;padding:7px 10px}
+#metroMapPanel .mm-actions a:hover{background:#202d49}
+#metroMapPanel .mm-actions button{font-size:12px;color:#eef2ff;border:1px solid #506182;border-radius:8px;padding:7px 12px;background:#202d49}
+#metroMapPanel iframe{display:block;flex:1;min-height:0;width:100%;border:0;background:#F6F5F1}
+#deepDivePanel .dd-map-links{display:flex;gap:7px;flex-wrap:wrap;margin:7px 0 12px}
+#deepDivePanel .dd-map-links a{font-size:11px;color:#dce5ff;text-decoration:none;border:1px solid #3b4b6b;border-radius:18px;padding:5px 9px;background:#17223a}
+#deepDivePanel .dd-map-links a:hover{border-color:#91a2ff;background:#202d49}
+@media(max-width:650px){
+ #metroMapPanel .mm-head{height:auto;min-height:54px;padding:8px 10px}
+ #metroMapPanel .mm-sub{display:none}
+ #metroMapPanel .mm-actions a{display:none}
+}
+
 /* Detailed research notes */
 #deepDiveBtn{border-color:#68cdb8;color:#c9fff2}
 #deepDivePanel{position:fixed;inset:0;z-index:1001;background:#0b1020;color:#eef2ff;display:none;overflow:auto;padding:22px;box-sizing:border-box}
@@ -838,8 +860,9 @@ main{flex:1;min-height:0;display:flex}
     <h1><span class="logo"><i></i><i></i><i></i></span>乐高拼模型 <small>LLM / VLM / VLA</small></h1>
     <div id="badge"></div>
     <div class="ctrls">
-      <button class="btn" id="deepDiveBtn" title="阅读详细技术发展与研究问答">深入资料</button>
       <button class="btn" id="knowledgeBtn" title="浏览 LLM / VLM / VLA 技术发展脉络">知识脉络</button>
+      <button class="btn" id="metroMapBtn" title="按时间、线路与迁移关系浏览 VLA 演进">发展地铁图</button>
+      <button class="btn" id="deepDiveBtn" title="阅读详细技术发展与研究问答">深入资料</button>
       <button class="btn primary" id="bRun" title="运行数据流">运行 <kbd>R</kbd></button>
       <button class="btn" id="bStep" title="逐步推进">下一步 <kbd>空格</kbd></button>
       <button class="btn" id="bEvo">演化路线 <kbd>E</kbd></button>
@@ -868,6 +891,14 @@ main{flex:1;min-height:0;display:flex}
   <aside id="hints"></aside>
 </main>
 <section id="lib"></section>
+
+<div id="metroMapPanel" role="dialog" aria-modal="true" aria-label="VLA 发展地铁图">
+ <div class="mm-head">
+  <div><span class="mm-title">VLA 发展地铁图</span><span class="mm-sub">时间演进 · LLM→VLA 迁移 · 研究问题 · 机会地图</span></div>
+  <div class="mm-actions"><a href="metro-map.html" target="_blank" rel="noopener">单独打开 ↗</a><button id="metroMapClose">返回主界面</button></div>
+ </div>
+ <iframe id="metroMapFrame" title="VLA 发展地铁图" data-src="metro-map.html"></iframe>
+</div>
 
 <div id="deepDivePanel" aria-label="深入资料">
  <div class="dd-wrap">
@@ -1721,7 +1752,9 @@ init();
   const label=mode==='dev'?'发展汇总':'问题汇总';
   const linked=mode==='questions'&&window.KNOWLEDGE_DATA?(r.related_node_ids||[]).map(id=>window.KNOWLEDGE_DATA.nodes.find(n=>n.id===id)).filter(Boolean):[];
   const linkHtml=linked.length?'<div class="dd-note">关联基础知识节点（点击可跳转）：</div><div class="dd-tabs">'+linked.map(n=>'<button data-knowledge="'+escD(n.id)+'">'+escD(n.name)+'</button>').join('')+'</div>':'';
-  reader.innerHTML='<h3>'+escD(r.title)+'</h3><div class="dd-note">来源：'+label+' · 原文页码：'+r.page_start+(r.page_end!==r.page_start?'–'+r.page_end:'')+'</div>'+linkHtml+'<div class="dd-content">'+escD(r.content).replace(/\[\[PAGE (\d+)\]\]/g,'<span class="dd-page">第 $1 页</span>')+'</div>';
+  const metroIds=mode==='questions'?(r.metro_question_ids||[]):[];
+  const metroLinkHtml=metroIds.length?'<div class="dd-note">地铁图中的对应问题（打开可查看简明结论、迁移性判断和最小实验）：</div><div class="dd-map-links">'+metroIds.map(qid=>'<a href="metro-map.html?question='+encodeURIComponent(qid)+'#questions" target="_blank" rel="noopener">'+escD(qid)+' · 地铁图分析 ↗</a>').join('')+'</div>':'';
+  reader.innerHTML='<h3>'+escD(r.title)+'</h3><div class="dd-note">来源：'+label+' · 原文页码：'+r.page_start+(r.page_end!==r.page_start?'–'+r.page_end:'')+'</div>'+linkHtml+metroLinkHtml+'<div class="dd-content">'+escD(r.content).replace(/\[\[PAGE (\d+)\]\]/g,'<span class="dd-page">第 $1 页</span>')+'</div>';
   reader.querySelectorAll('[data-knowledge]').forEach(b=>b.addEventListener('click',()=>{
    const node=window.KNOWLEDGE_DATA.nodes.find(n=>n.id===b.dataset.knowledge);if(!node)return;
    root.classList.remove('open');const kp=document.getElementById('knowledgeBtn');kp?.click();
@@ -1753,6 +1786,24 @@ init();
  $d('ddQTab').addEventListener('click',()=>setMode('questions'));
  search.addEventListener('input',render);filter.addEventListener('change',render);
  setMode('dev');
+ const requestedDeepDive=new URLSearchParams(location.search).get('deepDive');
+ if(requestedDeepDive&&data.question_bank.questions.some(q=>q.id===requestedDeepDive)){
+  root.classList.add('open');setMode('questions');showRecord(requestedDeepDive);
+ }
+})();
+(() => {
+ const panel=document.getElementById('metroMapPanel');
+ const open=document.getElementById('metroMapBtn');
+ const close=document.getElementById('metroMapClose');
+ const frame=document.getElementById('metroMapFrame');
+ if(!panel||!open||!close||!frame)return;
+ open.addEventListener('click',()=>{
+  document.getElementById('deepDivePanel')?.classList.remove('open');
+  document.getElementById('knowledgePanel')?.classList.remove('open');
+  if(!frame.dataset.loaded){frame.src=frame.dataset.src;frame.dataset.loaded='1';}
+  panel.classList.add('open');
+ });
+ close.addEventListener('click',()=>panel.classList.remove('open'));
 })();
 
 </script>
