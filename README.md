@@ -110,3 +110,14 @@ tools/validate_config.py   配置检查脚本
 ### 数据完整性说明
 
 本批中 GST-VLA 的源材料未提供明确 venue/year 与组织信息，因此项目中保留为“未列”，不自行补全；其方法只按源材料记录。当前没有把检索中无法形成完整来源条目的 SOMA 作为正式知识节点，以避免把不确定信息写成确定事实。
+
+## NERO × XR-1 实战模型
+
+新增真实模型预设 **NERO × XR-1**：以 Xiaomi-Robotics-1-5B checkpoint 为基础，在 NERO 七自由度单臂上做下游微调与真机部署。乐高模型展示 Qwen3-VL AutoProcessor / Vision Tower / text backbone、MoT、DiT + Flow Matching、NERO 8D proprioception 和训练配方。
+
+- **实验版本切换**：M3（八任务关节空间基线）、M4（Merge23）、EF4（末端空间 + IK + Merge23）、M5（Step Flag）。
+- **地铁图 ↔ 乐高双向跳转**：站点可定位对应组件或实验版本；组件卡片可反向定位地铁图研究站点。
+- **技术核实文档**：[NERO × XR-1 verified architecture](docs/nero-xr1-verified-architecture.md)。
+- **关系数据**：`data/knowledge-bridge.js`；运行 `python3 tools/validate_bridge.py` 检查站点、积木和预设的引用。
+
+注意：XR-1 的内部 action_shape 为 30×60；NERO 客户端的有效状态和物理命令接口为 8 维。M5 的 Step Flag 是训练/诊断辅助通道，不会下发给机器人。

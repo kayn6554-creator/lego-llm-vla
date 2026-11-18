@@ -90,3 +90,14 @@ python3 tools/validate_config.py
   - `ignore`：识别时跳过的槽，用于论文没写清楚的部分，例如 `["connector"]`。
   - `alt`：某个槽可接受的其他积木，例如 `{"vision": ["vit", "clip_vit"]}`。
 - 想放进演化路线，就把 `id` 加到 `evolution` 数组里的合适位置。
+
+
+## 地铁图与乐高之间的双向关联
+
+跨页面关联集中维护在 `data/knowledge-bridge.js`，不要在两个页面里各自硬编码对应关系。
+
+每条关联包含 `nodeId`、`targetType`、`targetId`、`relation`、`label`；`version` 可选，用于指定默认实验版本。targetType 为 `brick`、`preset` 或 `version`。
+
+一篇论文可以对应多个积木，一个模型预设也可以关联多个地铁站点。不要仅凭名称相似就建立一一对应；先判断是同一研究对象、模型组件、技术方法还是下游项目实例。
+
+修改后运行 `python3 tools/validate_config.py` 与 `python3 tools/validate_bridge.py`。

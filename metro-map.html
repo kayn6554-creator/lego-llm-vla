@@ -2,6 +2,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <script src="data/knowledge-data.js"></script>
 <script src="data/metro-data.js"></script>
+<script src="data/knowledge-bridge.js"></script>
 <script>const DATA = {...window.METRO_DATA, nodes: window.KNOWLEDGE_DATA.nodes.map(n => ({...n, ...(window.METRO_DATA.node_overrides[n.id] || {})}))};</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -778,22 +779,18 @@ function nodePanel(n,c){
   const tags=n.tags.map(t=>`<span class="badge">${esc(t)}</span>`).join(" ");
   const sorted=ids=>[...ids].filter(i=>byId.has(i)).sort((a,b)=>byId.get(a)._d-byId.get(b)._d);
   const trs=n._tr.map(t=>`<div><span class="st ${SCLS[t.status]}">${t.status}</span><br><b>${esc(t.llm_idea)}</b><br>${esc(t.vla_practice)}</div>`).join("");
+  const bridgeLinks=(BRIDGE.links||[]).filter(x=>x.nodeId===n.id);
+  const bridgeHtml=bridgeLinks.length?`<div class="p-sec"><h4>乐高中的对应结构 / 实验版本</h4><div class="chips">${bridgeLinks.map(x=>`<button class="chip" data-bridge-type="${esc(x.targetType)}" data-bridge-id="${esc(x.targetId)}" data-bridge-variant="${esc(x.version||"M3")}">${esc(x.label)}</button>`).join("")}</div></div>`:"";
   return `<div class="p-meta"><span>${esc(L?L.name:n.layer)}</span><span>·</span><span>${esc(n.date)}</span>${n.verified===false?'<span class="badge uv">未核实</span>':'<span class="badge v">已核实</span>'}</div>
-  <div class="p-name">${esc(n.name)}</div><div class="p-org">${esc(n.org||"")}</div>
-  <div class="chips" style="margin-top:10px">${lineChips}</div>
-  <p class="p-lead">${esc(n.summary)}</p>
+  <div class="p-name">${esc(n.name)}</div><div class="p-org">${esc(n.org||"")}</div><div class="chips" style="margin-top:10px">${lineChips}</div><p class="p-lead">${esc(n.summary)}</p>
   ${tags?`<div style="display:flex;flex-wrap:wrap;gap:4px">${tags}</div>`:""}
   ${nodeQ.has(n.id)?`<div class="p-sec"><h4>我们的讨论 · ${nodeQ.get(n.id).length}</h4>${nodeQ.get(n.id).map(qItem).join("")}</div>`:""}
   ${termNodes.has(n.id)?`<div class="p-sec"><h4>相关术语</h4><div class="chips">${termNodes.get(n.id).map(g=>termChip(g.term)).join("")}</div></div>`:""}
-  <div class="p-sec"><h4>解决的问题</h4><p>${esc(n.problem||"—")}</p></div>
-  <div class="p-sec"><h4>方法</h4><p>${esc(n.method||"—")}</p></div>
-  <div class="p-sec"><h4>论文</h4><div class="p-paper"><div class="pt">${esc(n.paper_title||"—")}</div>${n.link?`<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.link)} ↗</a>`:'<span class="empty-cell">暂无可核实的链接</span>'}</div></div>
-  <div class="p-sec"><h4>直接继承自</h4>${chipList(n.inherits_from,"（起点）")}</div>
-  <div class="p-sec"><h4>直接后继</h4>${chipList(n._children,"（暂无）")}</div>
-  <div class="p-sec"><h4>完整上游链 · ${c.up.size}</h4>${chipList(sorted(c.up),"（无）")}</div>
-  <div class="p-sec"><h4>完整下游链 · ${c.down.size}</h4>${chipList(sorted(c.down),"（无）")}</div>
-  <div class="p-sec"><h4>相关工作</h4>${chipList(n.related)}</div>
-  ${trs?`<div class="p-sec"><h4>换乘关系（LLM → VLA）</h4><div class="trlist">${trs}</div></div>`:""}
+  <div class="p-sec"><h4>解决的问题</h4><p>${esc(n.problem||"—")}</p></div><div class="p-sec"><h4>方法</h4><p>${esc(n.method||"—")}</p></div>
+  <div class="p-sec"><h4>论文 / 来源</h4><div class="p-paper"><div class="pt">${esc(n.paper_title||"—")}</div>${n.link?`<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.link)} ↗</a>`:'<span class="empty-cell">暂无可核实的链接</span>'}</div></div>
+  <div class="p-sec"><h4>直接继承自</h4>${chipList(n.inherits_from,"（起点）")}</div><div class="p-sec"><h4>直接后继</h4>${chipList(n._children,"（暂无）")}</div>
+  <div class="p-sec"><h4>完整上游链 · ${c.up.size}</h4>${chipList(sorted(c.up),"（无）")}</div><div class="p-sec"><h4>完整下游链 · ${c.down.size}</h4>${chipList(sorted(c.down),"（无）")}</div>
+  <div class="p-sec"><h4>相关工作</h4>${chipList(n.related)}</div>${trs?`<div class="p-sec"><h4>换乘关系（LLM → VLA）</h4><div class="trlist">${trs}</div></div>`:""}${bridgeHtml}
   <div class="p-sec"><h4>ID</h4><p class="mono" style="font-size:12px">${esc(n.id)}</p></div>`;
 }
 function labPanel(){
@@ -801,13 +798,19 @@ function labPanel(){
   <div class="p-name">${esc(LAB.name)}</div>
   <p class="p-lead">${esc(LAB.summary)}</p>
   <div class="p-sec"><h4>配置</h4><ul>${(LAB.details||[]).map(d=>`<li>${esc(d)}</li>`).join("")}</ul></div>
-  <div class="p-sec"><h4>位置说明</h4><p>标记放在中游层的“RL 后训练与 value function”线上：模型本体沿用 π0 的 VLM + flow matching 路线，当前要做的是用成功和失败数据做离线后训练，而不是从头预训练。</p></div>
+  <div class="p-sec"><h4>位置说明</h4><p>标记放在 VLA 架构主线上：当前项目基于 Xiaomi-Robotics-1，重点是 NERO 下游微调、动作空间适配、步骤边界控制与真机评测，而不是从头预训练基础模型。</p></div>
+  <div class="p-sec"><h4>模型拼装</h4><button class="chip" data-bridge-type="preset" data-bridge-id="nero_xr1" data-bridge-variant="M3">打开 NERO × XR-1 乐高模型</button></div>
   <div class="p-sec"><h4>最相关的站点</h4>${chipList(LAB.related)}</div>`;
 }
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-go],[data-q],[data-term],[data-qmap],[data-qopp],[data-qlist]"); if(!t) return; e.preventDefault();
+  const t=e.target.closest("[data-go],[data-q],[data-term],[data-qmap],[data-qopp],[data-qlist],[data-bridge-type]"); if(!t) return; e.preventDefault();
   const d=t.dataset;
   if(d.go) goNode(d.go);
+  else if(d.bridgeType){
+    const msg={type:"lego-open",targetType:d.bridgeType,targetId:d.bridgeId,variant:d.bridgeVariant||"M3"};
+    if(window.parent!==window) window.parent.postMessage(msg,location.origin);
+    else{const u=new URL("index.html",location.href);if(d.bridgeType==="brick")u.searchParams.set("brick",d.bridgeId);else if(d.bridgeType==="preset")u.searchParams.set("preset",d.bridgeId);else{u.searchParams.set("preset","nero_xr1");u.searchParams.set("variant",d.bridgeId);}location.href=u.href;}
+  }
   else if(d.q) selectQuestion(d.q);
   else if(d.term) showTerm(d.term);
   else if(d.qmap){ if(viewNow!=="map"){ location.hash="map"; showView("map"); } selectQuestion(d.qmap,{focus:true}); }
@@ -989,8 +992,12 @@ let rto; addEventListener("resize",()=>{ clearTimeout(rto); rto=setTimeout(()=>{
 
 buildFilters();
 showView(location.hash.slice(1)||"map");
-const requestedQuestion=new URLSearchParams(location.search).get("question");
+const mapParams=new URLSearchParams(location.search);
+const requestedQuestion=mapParams.get("question");
 if(requestedQuestion && qById.has(requestedQuestion)){ showView("questions"); selectQuestion(requestedQuestion); }
+const requestedNode=mapParams.get("node");
+if(requestedNode && byId.has(requestedNode)) goNode(requestedNode);
+window.addEventListener("message",e=>{if(e.origin!==location.origin)return;const d=e.data||{};if(d.type==="metro-select-node"&&d.id&&byId.has(d.id))goNode(d.id);});
 if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>{ if(viewNow==="map"){ drawStatic(); update(); } });
 })();
 </script>
