@@ -94,3 +94,19 @@ tools/validate_config.py   配置检查脚本
 ## 许可
 
 [MIT](LICENSE)
+
+## 2026-11-18 新增论文批次
+
+本批资料按用户已核对的来源整理并接入知识脉络、地铁图和乐高积木组件。共吸收 28 个论文条目：其中 MolmoAct 2 为已有节点升级，其余形成新的知识节点；同时新增 EgoScale、LUCID、RoboTTT 等人类视频/上下文扩展方向，并补齐空间中间表示、动作流形、阶段化控制和多维评测等线路。
+
+### 本批重点新增线路
+
+- 语言 → 空间中间表示 → 动作：RoboPoint → RT-Affordance → 3DS-VLA / ST4VLA → MolmoAct / GST-VLA → Embodied-R1。
+- 人类视频 → 机器人迁移：Phantom → Human2Sim2Robot / LUCID / EgoScale → VIPA-VLA / RAD → Being-H0。
+- 动作表示与生成：FAST → Discrete Diffusion VLA / LAST → 阶段化动作专家（Move-Then-Operate）。
+- 上下文与实时执行：RoboTTT → TIC-VLA，与已有 RTC / memory 线路连接。
+- 评测：VLA-Arena 接入现有 LIBERO、SimplerEnv、AutoEval、WorldEval、RoboArena 评测线路。
+
+### 数据完整性说明
+
+本批中 GST-VLA 的源材料未提供明确 venue/year 与组织信息，因此项目中保留为“未列”，不自行补全；其方法只按源材料记录。当前没有把检索中无法形成完整来源条目的 SOMA 作为正式知识节点，以避免把不确定信息写成确定事实。
