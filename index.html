@@ -3691,12 +3691,43 @@ let neroVersion="M3";
 function renderNeroVersion(id="M3"){const v=NERO_VERSIONS[id]||NERO_VERSIONS.M3;neroVersion=id;document.querySelectorAll("[data-nero-version]").forEach(b=>b.classList.toggle("active",b.dataset.neroVersion===id));const target=document.getElementById("neroVersionDetail");if(!target)return;target.innerHTML=`<div class="np-version-title"><strong>${v.title}</strong><span class="badge">${v.tag}</span></div><p>${v.intro}</p><ul>${v.bullets.map(x=>`<li>${x}</li>`).join("")}</ul><div class="np-caveat">${v.caveat}</div>`;}
 function openNeroProjectPanel(version="M3"){document.getElementById("deepDivePanel")?.classList.remove("open");document.getElementById("knowledgePanel")?.classList.remove("open");document.getElementById("metroMapPanel")?.classList.remove("open");document.getElementById("neroProjectPanel")?.classList.add("open");renderNeroVersion(version);}
 function closeNeroProjectPanel(){document.getElementById("neroProjectPanel")?.classList.remove("open");}
-function openMetroNode(nodeId){closeCard();closeNeroProjectPanel();const panel=document.getElementById("metroMapPanel"),frame=document.getElementById("metroMapFrame");if(!panel||!frame)return;document.getElementById("deepDivePanel")?.classList.remove("open");document.getElementById("knowledgePanel")?.classList.remove("open");panel.classList.add("open");if(!frame.dataset.loaded){frame.src=frame.dataset.src+"?node="+encodeURIComponent(nodeId);frame.dataset.loaded="1";}else if(frame.contentWindow)frame.contentWindow.postMessage({type:"metro-select-node",id:nodeId},location.origin);}
+const metroMapFrame=document.getElementById("metroMapFrame");
+let metroFrameReady=false,pendingMetroNode=null;
+function flushPendingMetroNode(){
+  if(!metroFrameReady||!pendingMetroNode||!metroMapFrame?.contentWindow)return;
+  const id=pendingMetroNode;pendingMetroNode=null;
+  metroMapFrame.contentWindow.postMessage({type:"metro-select-node",id},location.origin);
+}
+function markMetroFrameReady(){metroFrameReady=true;flushPendingMetroNode();}
+metroMapFrame?.addEventListener("load",markMetroFrameReady);
+function openMetroNode(nodeId){
+  closeCard();closeNeroProjectPanel();
+  const panel=document.getElementById("metroMapPanel"),frame=metroMapFrame;
+  if(!panel||!frame)return;
+  document.getElementById("deepDivePanel")?.classList.remove("open");
+  document.getElementById("knowledgePanel")?.classList.remove("open");
+  panel.classList.add("open");
+  if(!frame.dataset.loaded){
+    pendingMetroNode=nodeId;metroFrameReady=false;
+    frame.dataset.loaded="1";frame.src=frame.dataset.src;
+  }else if(metroFrameReady){
+    frame.contentWindow?.postMessage({type:"metro-select-node",id:nodeId},location.origin);
+  }else pendingMetroNode=nodeId;
+}
 document.getElementById("neroProjectBtn")?.addEventListener("click",()=>openNeroProjectPanel(neroVersion));
 document.getElementById("npClose")?.addEventListener("click",closeNeroProjectPanel);
 document.getElementById("npLoadPreset")?.addEventListener("click",()=>{loadPreset("nero_xr1");closeNeroProjectPanel();});
 document.getElementById("neroProjectPanel")?.addEventListener("click",e=>{const b=e.target.closest("[data-nero-version]");if(b)renderNeroVersion(b.dataset.neroVersion);});
-window.addEventListener("message",e=>{if(e.origin!==location.origin)return;const d=e.data||{};if(d.type!=="lego-open")return;document.getElementById("metroMapPanel")?.classList.remove("open");if(d.targetType==="brick"&&B[d.targetId])openCard(d.targetId);else if(d.targetType==="preset"&&PRESET[d.targetId]){loadPreset(d.targetId);if(d.targetId==="nero_xr1")openNeroProjectPanel(d.variant||"M3");}else if(d.targetType==="version"&&NERO_VERSIONS[d.targetId]){loadPreset("nero_xr1");openNeroProjectPanel(d.targetId);}});
+window.addEventListener("message",e=>{
+  if(e.origin!==location.origin)return;
+  const d=e.data||{};
+  if(d.type==="metro-ready"&&e.source===metroMapFrame?.contentWindow){markMetroFrameReady();return;}
+  if(d.type!=="lego-open"||e.source!==metroMapFrame?.contentWindow)return;
+  document.getElementById("metroMapPanel")?.classList.remove("open");
+  if(d.targetType==="brick"&&B[d.targetId])openCard(d.targetId);
+  else if(d.targetType==="preset"&&PRESET[d.targetId]){loadPreset(d.targetId);if(d.targetId==="nero_xr1")openNeroProjectPanel(d.variant||"M3");}
+  else if(d.targetType==="version"&&NERO_VERSIONS[d.targetId]){loadPreset("nero_xr1");openNeroProjectPanel(d.targetId);}
+});
 const legoParams=new URLSearchParams(location.search);const requestedPreset=legoParams.get("preset");if(requestedPreset&&PRESET[requestedPreset]){loadPreset(requestedPreset);if(requestedPreset==="nero_xr1")openNeroProjectPanel(legoParams.get("variant")||"M3");}const requestedBrick=legoParams.get("brick");if(requestedBrick&&B[requestedBrick])openCard(requestedBrick);
 
 </script>

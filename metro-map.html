@@ -121,7 +121,7 @@ main{position:relative}
 .node{cursor:pointer}
 .node rect{fill:var(--station)}
 .node.unv rect{stroke-dasharray:2.2 1.6}
-.lbl{font-size:10.5px;fill:var(--ink);paint-order:stroke;stroke:var(--bg);stroke-width:3.2px;stroke-linejoin:round;pointer-events:none}
+.lbl{font-size:10.5px;fill:var(--ink);paint-order:stroke;stroke:var(--bg);stroke-width:3.2px;stroke-linejoin:round;pointer-events:all;cursor:pointer}
 .lbl.w3{font-weight:600;font-size:11.5px}
 .lbl.w1{fill:var(--ink2)}
 .dim{opacity:.1!important}
@@ -501,12 +501,12 @@ const dates=nodes.map(n=>n._d).concat([parseDate(LAB.date)]);
 const dMin=d3.timeMonth.offset(d3.min(dates),-6), dMax=d3.timeMonth.offset(d3.max(dates),5);
 const x0=d3.scaleTime().domain([dMin,dMax]);
 let T=d3.zoomIdentity, xs=x0.copy();
-const zoom=d3.zoom().scaleExtent([0.7,90])
+const zoom=d3.zoom().scaleExtent([0.7,90]).clickDistance(4)
   .filter(ev=> ev.type==="wheel" ? Math.abs(ev.deltaY)>=Math.abs(ev.deltaX) : (!ev.ctrlKey && !ev.button))
   .on("zoom",ev=>{ T=ev.transform; schedule(); hideTip(); });
 svg.call(zoom).on("dblclick.zoom",null);
 svg.node().addEventListener("wheel",ev=>{ if(Math.abs(ev.deltaX)>Math.abs(ev.deltaY)){ ev.preventDefault(); zoom.translateBy(svg,-ev.deltaX/T.k,0);} },{passive:false});
-svg.on("click",ev=>{ if(ev.defaultPrevented) return; if(!ev.target.closest(".node,.lab-marker,.trhit")) clearSel(); });
+svg.on("click",ev=>{ if(ev.defaultPrevented) return; if(!ev.target.closest(".node,.lbl,.lab-marker,.trhit")) clearSel(); });
 
 function layout(){
   const hh=document.querySelector('header.top').getBoundingClientRect().height; const vm=document.getElementById('view-map'); vm.style.height=Math.max(560,innerHeight-hh)+'px'; panel.style.top=(innerWidth>860?hh:'auto')+(innerWidth>860?'px':'');
@@ -706,7 +706,10 @@ function drawLabels(vis,pxYear,labBox,bBoxes){
   }
   gLabels.selectAll("text").data(out,d=>d.n.id).join("text").attr("class",d=>"lbl w"+d.n._w)
     .attr("x",d=>d.a==="start"?d.box.x:d.a==="end"?d.box.x+d.box.w:d.box.x+d.box.w/2).attr("y",d=>d.box.y+d.box.h-2.5)
-    .attr("text-anchor",d=>d.a).text(d=>d.n._short);
+    .attr("text-anchor",d=>d.a).text(d=>d.n._short)
+    .on("mouseenter",(ev,d)=>{showTip(ev,tipHTML(d.n));setHover(d.n.id);})
+    .on("mousemove",ev=>moveTip(ev)).on("mouseleave",()=>{hideTip();setHover(null);})
+    .on("click",(ev,d)=>{ev.stopPropagation();hideTip();select(d.n.id);});
 }
 
 /* tooltip */
@@ -717,13 +720,13 @@ function hideTip(){ tip.hidden=true; }
 
 /* selection & highlight */
 function chain(id){ const up=new Set(), down=new Set(), ek=new Set();
-  const goUp=i=>{ const n=byId.get(i); n.inherits_from.forEach(p=>{ if(!byId.has(p)) return; ek.add(p+">"+i); if(!up.has(p)){ up.add(p); goUp(p);} }); };
-  const goDn=i=>{ byId.get(i)._children.forEach(c=>{ ek.add(i+">"+c); if(!down.has(c)){ down.add(c); goDn(c);} }); };
+  const goUp=i=>{ const n=byId.get(i); if(!n)return; (n.inherits_from||[]).forEach(p=>{ if(!byId.has(p)) return; ek.add(p+">"+i); if(!up.has(p)){ up.add(p); goUp(p);} }); };
+  const goDn=i=>{ const n=byId.get(i); if(!n)return; (n._children||[]).forEach(c=>{ if(!byId.has(c))return; ek.add(i+">"+c); if(!down.has(c)){ down.add(c); goDn(c);} }); };
   goUp(id); goDn(id); return {all:new Set([id,...up,...down]), up, down, ek}; }
 function select(id){
   const n=byId.get(id); if(!n) return;
   const c=chain(id); S.sel=id; S.hl=c.all; S.hlEdges=c.ek; S.qsel=null; S.hlTr=null;
-  S.partners=new Set(); n._tr.forEach(t=>[...t.llm_nodes,...t.vla_nodes].forEach(i=>S.partners.add(i))); n.related.forEach(i=>S.partners.add(i));
+  S.partners=new Set(); (n._tr||[]).forEach(t=>[...(t.llm_nodes||[]),...(t.vla_nodes||[])].forEach(i=>S.partners.add(i))); (n.related||[]).forEach(i=>S.partners.add(i));
   openPanel(nodePanel(n,c)); refreshViews();
 }
 function selectLab(){ S.qsel=null; S.hlTr=null; S.sel="__lab"; S.hl=new Set(LAB.related.filter(i=>byId.has(i))); S.hlEdges=new Set(); S.partners=null; openPanel(labPanel()); refreshViews(); }
@@ -997,7 +1000,8 @@ const requestedQuestion=mapParams.get("question");
 if(requestedQuestion && qById.has(requestedQuestion)){ showView("questions"); selectQuestion(requestedQuestion); }
 const requestedNode=mapParams.get("node");
 if(requestedNode && byId.has(requestedNode)) goNode(requestedNode);
-window.addEventListener("message",e=>{if(e.origin!==location.origin)return;const d=e.data||{};if(d.type==="metro-select-node"&&d.id&&byId.has(d.id))goNode(d.id);});
+window.addEventListener("message",e=>{if(e.origin!==location.origin||e.source!==window.parent)return;const d=e.data||{};if(d.type==="metro-select-node"&&d.id&&byId.has(d.id))goNode(d.id);});
+if(window.parent!==window) window.parent.postMessage({type:"metro-ready"},location.origin);
 if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>{ if(viewNow==="map"){ drawStatic(); update(); } });
 })();
 </script>
